@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Next.js
+/.next/
+/out/
+/build
+next-env.d.ts
+
+# Production
+/dist
+
+# Secrets / env
+.env
+.env*.local
+.env.development
+.env.production
+*.pem
+
+# Supabase
+supabase/.branches
+supabase/.temp
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor
+.DS_Store
+*.pem
+Thumbs.db
+.idea/
+*.swp
+
+# SpecBox runtime / quality artifacts (keep baselines + evidence config, ignore logs)
+.quality/logs/
+.quality/edits_backup/
+.quality/autopilot_decisions.jsonl
+.quality/hint_counters.json
+
+# Testing
+/coverage
+/playwright-report
+/test-results

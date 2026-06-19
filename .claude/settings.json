@@ -1,0 +1,152 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Read",
+      "Write",
+      "Edit",
+      "WebFetch(domain:*)"
+    ]
+  },
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          { "type": "command", "command": "node .claude/hooks/quality-first-guard.mjs", "timeout": 5 },
+          { "type": "command", "command": "node .claude/hooks/healing-budget-guard.mjs", "timeout": 5 },
+          { "type": "command", "command": "node .claude/hooks/pipeline-phase-guard.mjs", "timeout": 5 },
+          { "type": "command", "command": "node .claude/hooks/stripe-safety-guard.mjs", "timeout": 5 }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          { "type": "command", "command": "node .claude/hooks/quality-first-guard.mjs", "timeout": 5 },
+          { "type": "command", "command": "node .claude/hooks/healing-budget-guard.mjs", "timeout": 5 },
+          { "type": "command", "command": "node .claude/hooks/pipeline-phase-guard.mjs", "timeout": 5 },
+          { "type": "command", "command": "node .claude/hooks/stripe-safety-guard.mjs", "timeout": 5 }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "if": "Bash(.*--no-verify.*)", "command": "node .claude/hooks/no-bypass-guard.mjs", "timeout": 5 },
+          { "type": "command", "if": "Bash(.*push.*--force.*)", "command": "node .claude/hooks/no-bypass-guard.mjs", "timeout": 5 },
+          { "type": "command", "if": "Bash(.*push.*-f .*)", "command": "node .claude/hooks/no-bypass-guard.mjs", "timeout": 5 },
+          { "type": "command", "if": "Bash(.*reset --hard.*)", "command": "node .claude/hooks/no-bypass-guard.mjs", "timeout": 5 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          { "type": "command", "command": "node .claude/hooks/read-tracker.mjs", "timeout": 3 }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "if": "Bash(.*git commit.*)", "command": "node .claude/hooks/commit-spec-guard.mjs", "timeout": 10 },
+          { "type": "command", "if": "Bash(.*git commit.*)", "command": "node .claude/hooks/pre-commit-lint.mjs", "timeout": 60 },
+          { "type": "command", "if": "Bash(.*git commit.*)", "command": "node .claude/hooks/e2e-gate.mjs", "timeout": 15 },
+          { "type": "command", "if": "Bash(.*git commit.*)", "command": "node .claude/hooks/checkpoint-freshness-guard.mjs", "timeout": 5 },
+          { "type": "command", "if": "Bash(.*git push.*)", "command": "node .claude/hooks/uc-lifecycle-guard.mjs", "timeout": 10 }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          { "type": "command", "if": "Write(src/.*)", "command": "node .claude/hooks/spec-guard.mjs", "timeout": 10 },
+          { "type": "command", "if": "Write(lib/.*)", "command": "node .claude/hooks/spec-guard.mjs", "timeout": 10 },
+          { "type": "command", "if": "Write(presentation/pages/.*)", "command": "node .claude/hooks/design-gate.mjs", "timeout": 10 },
+          { "type": "command", "if": "Write(src/pages/.*)", "command": "node .claude/hooks/design-gate.mjs", "timeout": 10 },
+          { "type": "command", "if": "Write(app/.*)", "command": "node .claude/hooks/design-gate.mjs", "timeout": 10 }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          { "type": "command", "if": "Edit(src/.*)", "command": "node .claude/hooks/spec-guard.mjs", "timeout": 10 },
+          { "type": "command", "if": "Edit(lib/.*)", "command": "node .claude/hooks/spec-guard.mjs", "timeout": 10 },
+          { "type": "command", "if": "Edit(presentation/pages/.*)", "command": "node .claude/hooks/design-gate.mjs", "timeout": 10 },
+          { "type": "command", "if": "Edit(src/pages/.*)", "command": "node .claude/hooks/design-gate.mjs", "timeout": 10 },
+          { "type": "command", "if": "Edit(app/.*)", "command": "node .claude/hooks/design-gate.mjs", "timeout": 10 }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node .claude/hooks/on-session-end.mjs", "timeout": 10 }
+        ]
+      }
+    ]
+  },
+  "trello": {
+    "boardId": "",
+    "_comment": "Dejar vacío si no usa Trello. Rellenar con el ID del board tras ejecutar setup_board."
+  },
+  "acceptance": {
+    "framework": "gherkin",
+    "language": "es",
+    "features_path": {
+      "flutter": "test/acceptance/features/",
+      "react": "tests/acceptance/features/",
+      "go": "tests/acceptance/features/",
+      "python": "tests/acceptance/features/",
+      "google-apps-script": "tests/acceptance/features/"
+    }
+  },
+  "implement": {
+    "task_isolation": {
+      "enabled": true,
+      "task_budget_tokens": 16000,
+      "task_budget_mode": "warn",
+      "ownership_mode": "warn"
+    }
+  },
+  "stitch": {
+    "projectId": "TBD",
+    "deviceType": "DESKTOP",
+    "modelId": "GEMINI_3_PRO",
+    "contract": "native_v2",
+    "fallback": {
+      "enabled": true,
+      "strategy": ["edit_baseline", "variants_refine", "regenerate"],
+      "max_total_attempts": 3
+    },
+    "prompt": {
+      "validator_mode": "warn"
+    }
+  },
+  "plane": {
+    "defaultProject": "TBD",
+    "defaultState": "Backlog",
+    "projectId": "TBD",
+    "defaultAssignee": "TBD"
+  },
+  "veg": {
+    "enabled": true,
+    "image_provider": {
+      "primary": "canva",
+      "fallback": "lansespirit",
+      "maxImagesPerScreen": 5,
+      "defaultAspectRatio": "16:9",
+      "stockSearchFirst": false
+    },
+    "motion": {
+      "enabled": true,
+      "flutter": { "package": "flutter_animate", "version": "^4.5.2" },
+      "react": { "library": "motion", "version": "^12.35.0" }
+    },
+    "defaults": {
+      "fallback_mode": "uniform",
+      "fallback_motion_level": "moderate"
+    }
+  }
+}
