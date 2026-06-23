@@ -8,8 +8,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "node --test tests/unit/*.test.ts",
     "db:apply": "node scripts/db-apply.mjs",
     "db:rls-test": "node scripts/rls-test.mjs",
+    "db:clientes-test": "node scripts/clientes-test.mjs",
     "db:verify": "node scripts/db-apply.mjs && node scripts/rls-test.mjs"
   },
   "dependencies": {
