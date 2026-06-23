@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV = [
+  { href: "/tareas", label: "Tareas", icon: "✅" },
   { href: "/clientes", label: "Clientes", icon: "👥" },
   { href: "/servicios", label: "Servicios", icon: "📦" },
   { href: "/proveedores", label: "Proveedores", icon: "🏭" },

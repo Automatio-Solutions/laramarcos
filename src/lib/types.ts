@@ -43,6 +43,27 @@ export interface Servicio {
   created_at: string;
 }
 
+export type EstadoTarea = "pendiente" | "en_curso" | "bloqueada" | "completada";
+
+export interface Tarea {
+  id: string;
+  cliente_id: string | null;
+  titulo: string;
+  descripcion: string | null;
+  categoria: string | null;
+  estado: EstadoTarea;
+  vencimiento: string | null;
+  bloqueada: boolean;
+  motivo_bloqueo: string | null;
+  responsable_id: string | null;
+  created_at: string;
+}
+
+export interface TareaConRelaciones extends Tarea {
+  cliente_nombre: string | null;
+  responsable_nombre: string | null;
+}
+
 export interface PasoPlantilla {
   orden: number;
   nombre: string;
