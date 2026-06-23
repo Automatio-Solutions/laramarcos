@@ -1,13 +1,5 @@
-import Link from "next/link";
 import { logoutAction } from "@/app/login/actions";
-
-const NAV = [
-  { href: "/clientes", label: "Clientes", icon: "👥", active: true },
-  { href: "#", label: "Servicios", icon: "📦" },
-  { href: "#", label: "Proveedores", icon: "🏭" },
-  { href: "#", label: "Sectores", icon: "🏷️" },
-  { href: "#", label: "Auditoría", icon: "📋" },
-];
+import { PanelNav } from "@/components/PanelNav";
 
 export default function PanelLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -17,20 +9,7 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
           <p className="text-lg font-bold">LaraMarcos</p>
           <p className="text-xs text-white/60">Asesores</p>
         </div>
-        <nav className="flex-1 space-y-1 p-3">
-          {NAV.map((item) => (
-            <Link
-              key={item.label}
-              href={item.href}
-              className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm ${
-                item.active ? "bg-white/15 font-medium" : "text-white/70 hover:bg-white/10"
-              }`}
-            >
-              <span aria-hidden>{item.icon}</span>
-              {item.label}
-            </Link>
-          ))}
-        </nav>
+        <PanelNav />
         <form action={logoutAction} className="border-t border-white/10 p-3">
           <button className="w-full rounded-md px-3 py-2 text-left text-sm text-white/70 hover:bg-white/10">
             Cerrar sesión

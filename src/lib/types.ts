@@ -33,6 +33,25 @@ export interface ClienteConRelaciones extends Cliente {
   asesor_nombre: string | null;
 }
 
+export interface Servicio {
+  id: string;
+  nombre: string;
+  categoria: string | null;
+  precio_base: number;
+  condiciones_default: string | null;
+  activo: boolean;
+  created_at: string;
+}
+
+export interface Proveedor {
+  id: string;
+  cif: string;
+  nombre: string;
+  subcuenta_habitual: string | null;
+  iva_default: number | null;
+  created_at: string;
+}
+
 /** Datos del formulario de alta/edición. */
 export interface ClienteInput {
   cif: string;
