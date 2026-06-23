@@ -34,8 +34,8 @@ export async function updateSession(request: NextRequest) {
 
   const path = request.nextUrl.pathname;
   const isAuthRoute = path.startsWith("/login");
-  // El cron es público (protegido por CRON_SECRET, usa service role).
-  const isPublic = isAuthRoute || path.startsWith("/api/cron");
+  // Público: login, cron (protegido por CRON_SECRET) y aceptación digital de presupuestos (/p/<token>).
+  const isPublic = isAuthRoute || path.startsWith("/api/cron") || path.startsWith("/p/");
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();

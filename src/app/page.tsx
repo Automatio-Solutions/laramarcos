@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export default function Home() {
   const modulos = [
     { id: "M1", nombre: "Gestión de tareas + Clientes" },
@@ -20,6 +22,12 @@ export default function Home() {
           Sin papel, sin olvidos, sin ineficiencias. Cinco módulos conectados
           sobre una base de datos centralizada.
         </p>
+        <Link
+          href="/login"
+          className="inline-block rounded-md bg-primary px-5 py-2.5 font-medium text-white hover:bg-[var(--color-primary-hover)]"
+        >
+          Entrar al panel →
+        </Link>
       </header>
 
       <ul className="grid gap-3 sm:grid-cols-2">

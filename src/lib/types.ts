@@ -52,6 +52,35 @@ export interface Notificacion {
   created_at: string;
 }
 
+export type EstadoPresupuesto = "borrador" | "enviado" | "abierto" | "aceptado" | "rechazado";
+
+export interface LineaPresupuestoT {
+  concepto: string;
+  cantidad: number;
+  precio: number;
+  descuento: number;
+}
+
+export interface Presupuesto {
+  id: string;
+  cliente_id: string | null;
+  servicio_id: string | null;
+  estado: EstadoPresupuesto;
+  lineas: LineaPresupuestoT[];
+  descuento_global: number;
+  total: number;
+  condiciones: string | null;
+  validez_dias: number;
+  token: string;
+  tarea_id: string | null;
+  created_at: string;
+}
+
+export interface PresupuestoConCliente extends Presupuesto {
+  cliente_nombre: string | null;
+  cliente_cif: string | null;
+}
+
 export type EstadoTarea = "pendiente" | "en_curso" | "bloqueada" | "completada";
 
 export interface Tarea {
