@@ -40,6 +40,7 @@ export default async function ServiciosPage() {
                 <td className="px-4 py-3 text-right font-mono text-fg">{eur.format(s.precio_base)}</td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex justify-end gap-3">
+                    <Link href={`/servicios/${s.id}/plantilla`} className="text-sm font-medium text-fg-muted hover:underline">Plantilla</Link>
                     <Link href={`/servicios/${s.id}`} className="text-sm font-medium text-accent hover:underline">Editar</Link>
                     <form action={deleteServicioAction.bind(null, s.id)}>
                       <button className="text-sm font-medium text-error hover:underline">Borrar</button>
