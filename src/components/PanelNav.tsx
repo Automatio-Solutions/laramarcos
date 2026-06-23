@@ -4,11 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV = [
+  { href: "/dashboard", label: "Dashboard", icon: "📊" },
   { href: "/tareas", label: "Tareas", icon: "✅" },
   { href: "/clientes", label: "Clientes", icon: "👥" },
+  { href: "/facturacion", label: "Facturación", icon: "💸" },
   { href: "/servicios", label: "Servicios", icon: "📦" },
   { href: "/proveedores", label: "Proveedores", icon: "🏭" },
   { href: "/sectores", label: "Sectores", icon: "🏷️" },
+  { href: "/plantillas-tareas", label: "Plantillas", icon: "📁" },
   { href: "/auditoria", label: "Auditoría", icon: "📋" },
 ];
 

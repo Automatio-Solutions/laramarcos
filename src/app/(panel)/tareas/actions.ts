@@ -28,6 +28,23 @@ export async function updateEstadoTareaAction(id: string, estado: string) {
   if (estado === "completada") patch.completada_at = new Date().toISOString();
   await supabase.from("tareas").update(patch).eq("id", id);
 
+  // AC-21: al completar, crear la línea de factura asociada al cliente (si no existe ya)
+  if (estado === "completada") {
+    const { data: tar } = await supabase.from("tareas").select("titulo, cliente_id").eq("id", id).maybeSingle();
+    if (tar?.cliente_id) {
+      const { data: existe } = await supabase.from("lineas_factura").select("id").eq("tarea_id", id).maybeSingle();
+      if (!existe) {
+        await supabase.from("lineas_factura").insert({
+          tarea_id: id,
+          cliente_id: tar.cliente_id,
+          concepto: tar.titulo,
+          importe: 0,
+          facturada: false,
+        });
+      }
+    }
+  }
+
   // AC-16: al completar, avisar a los responsables de las tareas dependientes (desbloqueadas)
   if (estado === "completada") {
     const { data: deps } = await supabase
