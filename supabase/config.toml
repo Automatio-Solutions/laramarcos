@@ -1,0 +1,21 @@
+# Supabase config — laramarcos-asesores
+# Núcleo (M5). Se aplica con `supabase db reset` (local, requiere Docker) o
+# `supabase db push` contra el proyecto remoto vinculado.
+
+project_id = "laramarcos-asesores"
+
+[db]
+major_version = 15
+
+[db.migrations]
+schema_paths = []
+
+# pgTAP para los tests de aislamiento RLS (supabase test db)
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
+
+[auth]
+# Roles de aplicación (responsable/asesor/admin) viven en public.usuarios.rol,
+# no en JWT custom claims, para mantener RLS simple y auditable.
+enable_signup = true

@@ -1,0 +1,64 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ============================================================
+   Brand tokens — LaraMarcos Asesores (navy sobrio)
+   Genera utilidades: bg-primary, text-secondary, border-border,
+   text-fg, text-fg-muted, bg-surface-raised, bg-primary-subtle...
+   Fuente: doc/brand/brand_kit/variables.css
+   ============================================================ */
+@theme {
+  --color-primary: #1f223e;
+  --color-primary-hover: #15172b;
+  --color-primary-active: #0e0f1c;
+  --color-primary-subtle: #eaebf0;
+  --color-secondary: #828999;
+  --color-secondary-hover: #6e7585;
+  --color-accent: #5b6699;
+
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-info: #3b82f6;
+
+  --color-neutral-50: #f8f9fa;
+  --color-neutral-100: #f1f2f4;
+  --color-neutral-200: #e2e4e9;
+  --color-neutral-300: #cbced6;
+  --color-neutral-400: #9aa0ad;
+  --color-neutral-500: #6e7585;
+  --color-neutral-600: #565c6b;
+  --color-neutral-700: #424755;
+  --color-neutral-800: #2d3142;
+  --color-neutral-900: #1f223e;
+
+  --color-surface: #ffffff;
+  --color-surface-raised: #f8f9fa;
+  --color-border: #e2e4e9;
+  --color-fg: #1f223e;
+  --color-fg-muted: #565c6b;
+
+  --font-sans: var(--font-jakarta), system-ui, sans-serif;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+/* Dark mode: override de los tokens (cascada sobre las utilidades) */
+.dark {
+  --color-primary: #8b93c4;
+  --color-primary-hover: #a7aed6;
+  --color-primary-subtle: #14162a;
+  --color-secondary: #a7adba;
+  --color-accent: #8b93c4;
+  --color-surface: #14162a;
+  --color-surface-raised: #1f223e;
+  --color-border: #2d3142;
+  --color-fg: #f8f9fa;
+  --color-fg-muted: #9aa0ad;
+}
+
+body {
+  background: var(--color-surface);
+  color: var(--color-fg);
+  font-family: var(--font-jakarta), system-ui, sans-serif;
+}
