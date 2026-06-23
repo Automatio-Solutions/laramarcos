@@ -21,9 +21,14 @@ export default async function PresupuestosPage() {
           <h1 className="text-2xl font-bold text-primary">Presupuestos</h1>
           <p className="text-sm text-fg-muted">{presupuestos.length} en total · {aceptados} aceptados</p>
         </div>
-        <Link href="/presupuestos/nuevo" className="rounded-md bg-primary px-4 py-2 font-medium text-white hover:bg-[var(--color-primary-hover)]">
-          + Nuevo presupuesto
-        </Link>
+        <div className="flex gap-2">
+          <Link href="/presupuestos/recurrentes" className="rounded-md border border-border px-4 py-2 font-medium text-fg hover:bg-surface-raised">
+            🔁 Recurrentes
+          </Link>
+          <Link href="/presupuestos/nuevo" className="rounded-md bg-primary px-4 py-2 font-medium text-white hover:bg-[var(--color-primary-hover)]">
+            + Nuevo presupuesto
+          </Link>
+        </div>
       </header>
 
       <div className="overflow-hidden rounded-lg border border-border bg-surface">

@@ -30,7 +30,12 @@ export default async function PresupuestoPage({ params }: { params: Promise<{ id
           <h1 className="mt-1 text-2xl font-bold text-primary">{p.cliente_nombre ?? "Presupuesto"}</h1>
           <p className="text-sm text-fg-muted">{p.cliente_cif ?? ""} · {eur.format(p.total)}</p>
         </div>
-        <span className={`rounded-md px-3 py-1 text-sm font-medium capitalize ${ESTADO_COLOR[p.estado]}`}>{p.estado}</span>
+        <div className="flex items-center gap-3">
+          <a href={`/imprimir/presupuesto/${p.id}`} target="_blank" rel="noopener" className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg hover:bg-surface-raised">
+            📄 PDF
+          </a>
+          <span className={`rounded-md px-3 py-1 text-sm font-medium capitalize ${ESTADO_COLOR[p.estado]}`}>{p.estado}</span>
+        </div>
       </header>
 
       {p.estado === "aceptado" && p.tarea_id && (
