@@ -43,6 +43,12 @@ export interface Servicio {
   created_at: string;
 }
 
+export interface PasoPlantilla {
+  orden: number;
+  nombre: string;
+  plazo_relativo_dias: number;
+}
+
 export interface Proveedor {
   id: string;
   cif: string;
