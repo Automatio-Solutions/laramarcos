@@ -16,6 +16,7 @@
     "db:tareas-test": "node scripts/tareas-test.mjs",
     "db:ficha-test": "node scripts/ficha-test.mjs",
     "db:alertas-test": "node scripts/alertas-test.mjs",
+    "db:facturacion-test": "node scripts/facturacion-test.mjs",
     "db:verify": "node scripts/db-apply.mjs && node scripts/rls-test.mjs"
   },
   "dependencies": {
