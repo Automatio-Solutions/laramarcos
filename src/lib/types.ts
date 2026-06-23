@@ -64,6 +64,39 @@ export interface TareaConRelaciones extends Tarea {
   responsable_nombre: string | null;
 }
 
+export interface Subtarea {
+  id: string;
+  tarea_id: string;
+  titulo: string;
+  asignado_id: string | null;
+  asignado_nombre: string | null;
+  plazo: string | null;
+  estado: EstadoTarea;
+  orden: number;
+}
+
+export interface ComentarioConAutor {
+  id: string;
+  texto: string;
+  autor_nombre: string;
+  menciones: string[];
+  created_at: string;
+}
+
+export interface TiempoRow {
+  id: string;
+  segundos: number;
+  nota: string | null;
+  usuario_nombre: string | null;
+  ts: string;
+}
+
+export interface DependenciaTarea {
+  depende_de_id: string;
+  titulo: string;
+  estado: EstadoTarea;
+}
+
 export interface PasoPlantilla {
   orden: number;
   nombre: string;
