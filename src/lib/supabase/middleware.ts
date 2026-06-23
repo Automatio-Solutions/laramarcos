@@ -34,8 +34,10 @@ export async function updateSession(request: NextRequest) {
 
   const path = request.nextUrl.pathname;
   const isAuthRoute = path.startsWith("/login");
+  // El cron es público (protegido por CRON_SECRET, usa service role).
+  const isPublic = isAuthRoute || path.startsWith("/api/cron");
 
-  if (!user && !isAuthRoute) {
+  if (!user && !isPublic) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);

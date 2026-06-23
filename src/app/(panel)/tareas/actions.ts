@@ -27,6 +27,25 @@ export async function updateEstadoTareaAction(id: string, estado: string) {
   const patch: Record<string, unknown> = { estado };
   if (estado === "completada") patch.completada_at = new Date().toISOString();
   await supabase.from("tareas").update(patch).eq("id", id);
+
+  // AC-16: al completar, avisar a los responsables de las tareas dependientes (desbloqueadas)
+  if (estado === "completada") {
+    const { data: deps } = await supabase
+      .from("dependencias_tarea")
+      .select("tarea:tareas!dependencias_tarea_tarea_id_fkey(id, titulo, responsable_id)")
+      .eq("depende_de_id", id);
+    for (const d of deps ?? []) {
+      const dep = d.tarea as unknown as { id: string; titulo: string; responsable_id: string | null } | null;
+      if (dep?.responsable_id) {
+        await supabase.rpc("crear_notificacion", {
+          p_usuario: dep.responsable_id,
+          p_tipo: "desbloqueo",
+          p_mensaje: `Desbloqueada (predecesora completada): ${dep.titulo}`,
+          p_enlace: `/tareas/${dep.id}`,
+        });
+      }
+    }
+  }
   revalidatePath("/tareas");
 }
 

@@ -58,7 +58,7 @@ export async function setEstadoSubtareaAction(tareaId: string, subtareaId: strin
 export async function toggleBloqueoAction(tareaId: string, formData: FormData) {
   const motivo = String(formData.get("motivo") ?? "").trim();
   const supabase = await createClient();
-  const { data: t } = await supabase.from("tareas").select("bloqueada").eq("id", tareaId).maybeSingle();
+  const { data: t } = await supabase.from("tareas").select("bloqueada, responsable_id, titulo").eq("id", tareaId).maybeSingle();
   const bloquear = !t?.bloqueada;
   await supabase
     .from("tareas")
@@ -68,6 +68,16 @@ export async function toggleBloqueoAction(tareaId: string, formData: FormData) {
       estado: bloquear ? "bloqueada" : "pendiente",
     })
     .eq("id", tareaId);
+
+  // AC-10: al desbloquear, avisar al responsable
+  if (!bloquear && t?.responsable_id) {
+    await supabase.rpc("crear_notificacion", {
+      p_usuario: t.responsable_id,
+      p_tipo: "desbloqueo",
+      p_mensaje: `Tarea desbloqueada: ${t.titulo}`,
+      p_enlace: `/tareas/${tareaId}`,
+    });
+  }
   rev(tareaId);
 }
 
@@ -94,6 +104,17 @@ export async function addComentarioAction(tareaId: string, formData: FormData) {
     texto,
     menciones,
   });
+
+  // AC-12: notificar in-app a cada persona mencionada
+  for (const uid of menciones) {
+    if (uid === user?.id) continue;
+    await supabase.rpc("crear_notificacion", {
+      p_usuario: uid,
+      p_tipo: "mencion",
+      p_mensaje: `Te han mencionado en una tarea`,
+      p_enlace: `/tareas/${tareaId}`,
+    });
+  }
   rev(tareaId);
 }
 
