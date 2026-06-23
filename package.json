@@ -1,0 +1,16 @@
+{
+  "name": "laramarcos-asesores",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Plataforma de gestión LaraMarcos Asesores (M5 núcleo + módulos)",
+  "scripts": {
+    "db:apply": "node scripts/db-apply.mjs",
+    "db:rls-test": "node scripts/rls-test.mjs",
+    "db:verify": "node scripts/db-apply.mjs && node scripts/rls-test.mjs"
+  },
+  "devDependencies": {
+    "dotenv": "^16.4.7",
+    "pg": "^8.13.1"
+  }
+}
