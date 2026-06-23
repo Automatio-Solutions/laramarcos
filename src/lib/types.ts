@@ -43,6 +43,15 @@ export interface Servicio {
   created_at: string;
 }
 
+export interface Notificacion {
+  id: string;
+  tipo: string;
+  mensaje: string;
+  enlace: string | null;
+  leida: boolean;
+  created_at: string;
+}
+
 export type EstadoTarea = "pendiente" | "en_curso" | "bloqueada" | "completada";
 
 export interface Tarea {

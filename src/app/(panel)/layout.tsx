@@ -1,7 +1,10 @@
 import { logoutAction } from "@/app/login/actions";
 import { PanelNav } from "@/components/PanelNav";
+import { NotificacionesBell } from "@/components/NotificacionesBell";
+import { listNotificaciones, countNoLeidas } from "@/lib/repos/notificaciones";
 
-export default function PanelLayout({ children }: { children: React.ReactNode }) {
+export default async function PanelLayout({ children }: { children: React.ReactNode }) {
+  const [notificaciones, noLeidas] = await Promise.all([listNotificaciones(), countNoLeidas()]);
   return (
     <div className="flex min-h-screen">
       <aside className="flex w-64 flex-col bg-primary text-white">
@@ -16,7 +19,12 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
           </button>
         </form>
       </aside>
-      <main className="flex-1 bg-surface-raised">{children}</main>
+      <main className="flex-1 bg-surface-raised">
+        <div className="flex items-center justify-end border-b border-border bg-surface px-6 py-2">
+          <NotificacionesBell notificaciones={notificaciones} noLeidas={noLeidas} />
+        </div>
+        {children}
+      </main>
     </div>
   );
 }

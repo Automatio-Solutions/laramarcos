@@ -14,6 +14,8 @@
     "db:clientes-test": "node scripts/clientes-test.mjs",
     "db:catalogo-test": "node scripts/catalogo-test.mjs",
     "db:tareas-test": "node scripts/tareas-test.mjs",
+    "db:ficha-test": "node scripts/ficha-test.mjs",
+    "db:alertas-test": "node scripts/alertas-test.mjs",
     "db:verify": "node scripts/db-apply.mjs && node scripts/rls-test.mjs"
   },
   "dependencies": {
