@@ -13,6 +13,7 @@ const NAV = [
   { href: "/proveedores", label: "Proveedores", icon: "🏭" },
   { href: "/sectores", label: "Sectores", icon: "🏷️" },
   { href: "/vigilancia", label: "Vigilancia DOE/BOE", icon: "🗞️" },
+  { href: "/precontabilizacion", label: "Precontabilización", icon: "🧮" },
   { href: "/plantillas-tareas", label: "Plantillas", icon: "📁" },
   { href: "/auditoria", label: "Auditoría", icon: "📋" },
 ];
