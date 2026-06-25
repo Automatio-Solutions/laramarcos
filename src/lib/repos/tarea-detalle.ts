@@ -7,6 +7,13 @@ import type {
   DependenciaTarea,
 } from "@/lib/types";
 
+export interface ActividadItem {
+  ts: string;
+  texto: string;
+  usuario_nombre: string | null;
+  icono: string;
+}
+
 export interface TareaDetalle {
   tarea: TareaConRelaciones;
   subtareas: Subtarea[];
@@ -14,6 +21,64 @@ export interface TareaDetalle {
   tiempos: TiempoRow[];
   segundosTotal: number;
   dependencias: DependenciaTarea[];
+  actividad: ActividadItem[];
+}
+
+const ESTADO_TXT: Record<string, string> = {
+  pendiente: "Pendiente", en_curso: "En curso", bloqueada: "Bloqueada", completada: "Completada",
+};
+
+/** Construye el registro de actividad de la tarea a partir de la auditoría + comentarios + tiempos. */
+async function construirActividad(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  tareaId: string,
+  subtareaIds: string[],
+  comentarios: ComentarioConAutor[],
+  tiempos: TiempoRow[],
+): Promise<ActividadItem[]> {
+  const ids = [tareaId, ...subtareaIds];
+  const { data: aud } = await supabase
+    .from("auditoria")
+    .select("usuario_id, tabla, operacion, diff, ts")
+    .in("tabla", ["tareas", "subtareas"])
+    .in("registro_id", ids)
+    .order("ts", { ascending: false });
+
+  // Resolver nombres de usuario
+  const userIds = [...new Set((aud ?? []).map((r) => r.usuario_id).filter(Boolean) as string[])];
+  const nombres = new Map<string, string>();
+  if (userIds.length) {
+    const { data: us } = await supabase.from("usuarios").select("id, nombre").in("id", userIds);
+    for (const u of us ?? []) nombres.set(u.id as string, u.nombre as string);
+  }
+
+  const items: ActividadItem[] = [];
+  for (const r of aud ?? []) {
+    const usuario = r.usuario_id ? nombres.get(r.usuario_id as string) ?? null : "Sistema";
+    const diff = r.diff as { old?: Record<string, unknown>; new?: Record<string, unknown> } | null;
+    const esTarea = r.tabla === "tareas";
+    if (r.operacion === "INSERT") {
+      items.push({ ts: r.ts as string, usuario_nombre: usuario, icono: esTarea ? "🆕" : "➕", texto: esTarea ? "Creó la tarea" : `Añadió la subtarea «${diff?.new?.titulo ?? ""}»` });
+    } else if (r.operacion === "UPDATE" && diff?.old && diff?.new) {
+      const o = diff.old, n = diff.new;
+      if (o.estado !== n.estado) {
+        items.push({ ts: r.ts as string, usuario_nombre: usuario, icono: "🔄", texto: `${esTarea ? "" : "Subtarea: "}Estado «${ESTADO_TXT[o.estado as string] ?? o.estado}» → «${ESTADO_TXT[n.estado as string] ?? n.estado}»` });
+      } else if (esTarea && o.bloqueada !== n.bloqueada) {
+        items.push({ ts: r.ts as string, usuario_nombre: usuario, icono: n.bloqueada ? "⛔" : "✅", texto: n.bloqueada ? `Bloqueó la tarea (${n.motivo_bloqueo ?? ""})` : "Desbloqueó la tarea" });
+      } else if (esTarea && o.archivada !== n.archivada) {
+        items.push({ ts: r.ts as string, usuario_nombre: usuario, icono: "🗄", texto: n.archivada ? "Archivó la tarea" : "Restauró la tarea" });
+      } else if (!esTarea && o.asignado_id !== n.asignado_id) {
+        items.push({ ts: r.ts as string, usuario_nombre: usuario, icono: "👤", texto: `Asignó la subtarea «${n.titulo ?? ""}»` });
+      }
+    }
+  }
+  for (const c of comentarios) {
+    items.push({ ts: c.created_at, usuario_nombre: c.autor_nombre, icono: "💬", texto: `Comentó: ${c.texto.length > 60 ? c.texto.slice(0, 60) + "…" : c.texto}` });
+  }
+  for (const t of tiempos) {
+    items.push({ ts: t.ts, usuario_nombre: t.usuario_nombre, icono: "⏱", texto: `Registró ${Math.round(t.segundos / 60)} min${t.nota ? ` · ${t.nota}` : ""}` });
+  }
+  return items.sort((a, b) => (a.ts < b.ts ? 1 : -1));
 }
 
 export async function getTareaDetalle(id: string): Promise<TareaDetalle | null> {
@@ -113,6 +178,8 @@ export async function getTareaDetalle(id: string): Promise<TareaDetalle | null> 
     };
   });
 
+  const actividad = await construirActividad(supabase, id, subtareas.map((s) => s.id), comentarios, tiempos);
+
   return {
     tarea,
     subtareas,
@@ -120,5 +187,6 @@ export async function getTareaDetalle(id: string): Promise<TareaDetalle | null> 
     tiempos,
     segundosTotal: tiempos.reduce((a, t2) => a + t2.segundos, 0),
     dependencias,
+    actividad,
   };
 }

@@ -96,3 +96,30 @@ export async function createTareaAction(_p: TareaFormState, formData: FormData):
   revalidatePath("/tareas");
   redirect("/tareas");
 }
+
+// ---- Archivado ----
+export async function archivarTareaAction(id: string) {
+  const supabase = await createClient();
+  await supabase.from("tareas").update({ archivada: true }).eq("id", id);
+  revalidatePath("/tareas");
+}
+
+/** Archiva todas las tareas completadas (visibles para el usuario por RLS). */
+export async function archivarCompletadasAction() {
+  const supabase = await createClient();
+  await supabase.from("tareas").update({ archivada: true }).eq("estado", "completada").eq("archivada", false);
+  revalidatePath("/tareas");
+}
+
+export async function desarchivarTareaAction(id: string) {
+  const supabase = await createClient();
+  await supabase.from("tareas").update({ archivada: false }).eq("id", id);
+  revalidatePath("/archivo");
+  revalidatePath("/tareas");
+}
+
+export async function eliminarTareaAction(id: string) {
+  const supabase = await createClient();
+  await supabase.from("tareas").delete().eq("id", id);
+  revalidatePath("/tareas");
+}
