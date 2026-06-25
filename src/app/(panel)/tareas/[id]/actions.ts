@@ -54,6 +54,13 @@ export async function setEstadoSubtareaAction(tareaId: string, subtareaId: strin
   rev(tareaId);
 }
 
+/** Elimina una subtarea. */
+export async function eliminarSubtareaAction(tareaId: string, subtareaId: string) {
+  const supabase = await createClient();
+  await supabase.from("subtareas").delete().eq("id", subtareaId);
+  rev(tareaId);
+}
+
 // ---- UC-104: bloqueo por terceros ----
 export async function toggleBloqueoAction(tareaId: string, formData: FormData) {
   const motivo = String(formData.get("motivo") ?? "").trim();

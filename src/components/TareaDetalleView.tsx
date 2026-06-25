@@ -10,7 +10,7 @@ import {
 import { ESTADO_LABEL } from "@/lib/estados";
 import { EstadoSelect } from "@/components/EstadoSelect";
 import {
-  addSubtareaAction, asignarSubtareaAction, setEstadoSubtareaAction,
+  addSubtareaAction, asignarSubtareaAction, setEstadoSubtareaAction, eliminarSubtareaAction,
   toggleBloqueoAction, addComentarioAction, addDependenciaAction,
   removeDependenciaAction, addTiempoAction,
 } from "@/app/(panel)/tareas/[id]/actions";
@@ -73,6 +73,13 @@ export async function TareaDetalleView({ id, enModal = false }: { id: string; en
                 </select>
                 <input type="date" name="plazo" defaultValue={s.plazo ?? ""} className="rounded-md border border-border bg-surface px-1 py-1 text-xs text-fg" />
                 <button className="rounded-md border border-border px-2 py-1 text-xs text-fg hover:bg-surface-raised">Asignar</button>
+              </form>
+              <form action={eliminarSubtareaAction.bind(null, id, s.id)}>
+                <button className="rounded p-1 text-error hover:bg-error/10" title="Eliminar subtarea">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-4 w-4">
+                    <path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" />
+                  </svg>
+                </button>
               </form>
             </li>
           ))}
