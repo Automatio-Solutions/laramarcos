@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { Logo } from "@/components/Logo";
 import { loginAction, type LoginState } from "./actions";
 
 const initial: LoginState = {};
@@ -14,8 +15,8 @@ export default function LoginPage() {
         action={action}
         className="w-full max-w-sm space-y-5 rounded-lg border border-border bg-surface p-8 shadow-sm"
       >
-        <div className="space-y-1 text-center">
-          <h1 className="text-2xl font-bold text-primary">LaraMarcos Asesores</h1>
+        <div className="space-y-3 text-center">
+          <Logo className="mx-auto h-14 w-auto text-primary" />
           <p className="text-sm text-fg-muted">Accede al panel de gestión</p>
         </div>
 

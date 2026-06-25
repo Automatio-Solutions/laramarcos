@@ -4,7 +4,7 @@ import { useActionState, useState } from "react";
 import Link from "next/link";
 import { Field } from "@/components/ui/Field";
 import { isValidNifCif, isValidIban, isValidEmail } from "@/lib/validators/identity";
-import type { ClienteFormState } from "@/app/(panel)/clientes/actions";
+import { crearSectorAction, type ClienteFormState } from "@/app/(panel)/clientes/actions";
 import type { ClienteConRelaciones, Sector, Usuario } from "@/lib/types";
 
 const initial: ClienteFormState = { ok: false, errors: {} };
@@ -47,7 +47,40 @@ export function ClienteForm({
   const onBlur: React.FocusEventHandler<HTMLInputElement> = (e) =>
     validateField(e.target.name, e.target.value);
 
-  const selectedSectores = new Set(cliente?.sectores.map((s) => s.id));
+  const [allSectores, setAllSectores] = useState<Sector[]>(sectores);
+  const [checkedSectores, setCheckedSectores] = useState<Set<string>>(
+    () => new Set(cliente?.sectores.map((s) => s.id)),
+  );
+  const [nuevoSector, setNuevoSector] = useState("");
+  const [sectorError, setSectorError] = useState("");
+  const [addingSector, setAddingSector] = useState(false);
+
+  function toggleSector(id: string, checked: boolean) {
+    setCheckedSectores((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  async function addSector() {
+    const nombre = nuevoSector.trim();
+    if (!nombre || addingSector) return;
+    setSectorError("");
+    setAddingSector(true);
+    const res = await crearSectorAction(nombre);
+    setAddingSector(false);
+    if (!res.ok) {
+      setSectorError(res.error);
+      return;
+    }
+    setAllSectores((prev) =>
+      prev.some((s) => s.id === res.sector.id) ? prev : [...prev, res.sector],
+    );
+    setCheckedSectores((prev) => new Set(prev).add(res.sector.id));
+    setNuevoSector("");
+  }
 
   return (
     <form action={formAction} className="max-w-2xl space-y-5">
@@ -86,13 +119,45 @@ export function ClienteForm({
       <fieldset className="space-y-2">
         <legend className="text-sm font-medium text-fg">Sectores</legend>
         <div className="flex flex-wrap gap-2">
-          {sectores.map((s) => (
+          {allSectores.map((s) => (
             <label key={s.id} className="flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-fg has-checked:border-primary has-checked:bg-primary-subtle">
-              <input type="checkbox" name="sector_ids" value={s.id} defaultChecked={selectedSectores.has(s.id)} />
+              <input
+                type="checkbox"
+                name="sector_ids"
+                value={s.id}
+                checked={checkedSectores.has(s.id)}
+                onChange={(e) => toggleSector(s.id, e.target.checked)}
+              />
               {s.nombre}
             </label>
           ))}
         </div>
+
+        <div className="flex gap-2 pt-1">
+          <input
+            value={nuevoSector}
+            onChange={(e) => setNuevoSector(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addSector();
+              }
+            }}
+            placeholder="Añadir sector nuevo…"
+            className="w-56 rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-fg outline-none focus:border-primary"
+          />
+          <button
+            type="button"
+            onClick={addSector}
+            disabled={addingSector || !nuevoSector.trim()}
+            className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg hover:bg-surface-raised disabled:opacity-60"
+          >
+            {addingSector ? "Añadiendo…" : "+ Añadir"}
+          </button>
+        </div>
+        {sectorError && (
+          <p className="text-sm text-error" role="alert">{sectorError}</p>
+        )}
       </fieldset>
 
       {state.message && (
