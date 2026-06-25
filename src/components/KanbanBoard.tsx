@@ -95,8 +95,8 @@ export function KanbanBoard({ tareas: initial }: { tareas: TareaConRelaciones[] 
                           className="rounded p-1 text-error hover:bg-error/10"
                           title="Eliminar"
                         >
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-1 0v12a1 1 0 01-1 1H9a1 1 0 01-1-1V7m3 4v6m4-6v6" />
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-4 w-4">
+                            <path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" />
                           </svg>
                         </button>
                       </div>
