@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listClientes } from "@/lib/repos/clientes";
+import { ClienteRow } from "@/components/ClienteRow";
 
 export default async function ClientesPage({
   searchParams,
@@ -56,25 +57,7 @@ export default async function ClientesPage({
               </tr>
             )}
             {clientes.map((c) => (
-              <tr key={c.id} className="border-t border-border hover:bg-surface-raised">
-                <td className="px-4 py-3 font-mono text-xs text-fg">{c.cif}</td>
-                <td className="px-4 py-3 text-fg">{c.razon_social}</td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-wrap gap-1">
-                    {c.sectores.map((s) => (
-                      <span key={s.id} className="rounded-md bg-primary-subtle px-2 py-0.5 text-xs text-primary">
-                        {s.nombre}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-fg-muted">{c.asesor_nombre ?? "—"}</td>
-                <td className="px-4 py-3 text-right">
-                  <Link href={`/clientes/${c.id}`} className="text-sm font-medium text-accent hover:underline">
-                    Editar
-                  </Link>
-                </td>
-              </tr>
+              <ClienteRow key={c.id} cliente={c} />
             ))}
           </tbody>
         </table>

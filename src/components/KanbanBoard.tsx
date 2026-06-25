@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ESTADOS } from "@/lib/estados";
+import { ESTADOS_TABLERO } from "@/lib/estados";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { updateEstadoTareaAction, archivarTareaAction, archivarCompletadasAction, eliminarTareaAction } from "@/app/(panel)/tareas/actions";
 import type { TareaConRelaciones, EstadoTarea } from "@/lib/types";
@@ -10,7 +10,8 @@ import type { TareaConRelaciones, EstadoTarea } from "@/lib/types";
 type Pendiente =
   | { tipo: "archivar"; id: string; titulo: string }
   | { tipo: "eliminar"; id: string; titulo: string }
-  | { tipo: "archivarTodas"; n: number };
+  | { tipo: "archivarTodas"; n: number }
+  | { tipo: "completar"; id: string; titulo: string; n: number };
 
 export function KanbanBoard({ tareas: initial }: { tareas: TareaConRelaciones[] }) {
   const router = useRouter();
@@ -20,12 +21,22 @@ export function KanbanBoard({ tareas: initial }: { tareas: TareaConRelaciones[] 
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
   const [procesando, setProcesando] = useState(false);
 
+  async function aplicarEstado(id: string, estado: EstadoTarea) {
+    setTareas((prev) => prev.map((t) => (t.id === id ? { ...t, estado } : t)));
+    await updateEstadoTareaAction(id, estado);
+  }
+
   async function onDrop(estado: EstadoTarea) {
     if (!dragId) return;
     const id = dragId;
     setDragId(null);
-    setTareas((prev) => prev.map((t) => (t.id === id ? { ...t, estado } : t)));
-    await updateEstadoTareaAction(id, estado);
+    const t = tareas.find((x) => x.id === id);
+    // Confirmar si se marca como completada con subtareas pendientes
+    if (estado === "completada" && t && t.subtareas_pendientes > 0) {
+      setPendiente({ tipo: "completar", id, titulo: t.titulo, n: t.subtareas_pendientes });
+      return;
+    }
+    await aplicarEstado(id, estado);
   }
 
   async function confirmar() {
@@ -37,6 +48,8 @@ export function KanbanBoard({ tareas: initial }: { tareas: TareaConRelaciones[] 
     } else if (pendiente.tipo === "eliminar") {
       setTareas((prev) => prev.filter((t) => t.id !== pendiente.id));
       await eliminarTareaAction(pendiente.id);
+    } else if (pendiente.tipo === "completar") {
+      await aplicarEstado(pendiente.id, "completada");
     } else {
       setTareas((prev) => prev.filter((t) => t.estado !== "completada"));
       await archivarCompletadasAction();
@@ -47,8 +60,8 @@ export function KanbanBoard({ tareas: initial }: { tareas: TareaConRelaciones[] 
 
   return (
     <>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-        {ESTADOS.map((col) => {
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        {ESTADOS_TABLERO.map((col) => {
           const items = tareas.filter((t) => t.estado === col.key);
           return (
             <div
@@ -101,9 +114,15 @@ export function KanbanBoard({ tareas: initial }: { tareas: TareaConRelaciones[] 
                         </button>
                       </div>
                     </div>
+                    {t.bloqueada_por.length > 0 && (
+                      <p className="mt-1 inline-block rounded bg-error/10 px-1.5 py-0.5 text-[11px] font-medium text-error">
+                        🔒 Bloqueada por: {t.bloqueada_por.join(", ")}
+                      </p>
+                    )}
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-fg-muted">
                       {t.cliente_nombre && <span>{t.cliente_nombre}</span>}
                       {t.vencimiento && <span>· {new Date(t.vencimiento).toLocaleDateString("es-ES")}</span>}
+                      {t.subtareas_pendientes > 0 && <span>· {t.subtareas_pendientes} subtarea(s) pendiente(s)</span>}
                     </div>
                     {t.responsable_nombre && (
                       <p className="mt-1 text-xs text-fg-muted">👤 {t.responsable_nombre}</p>
@@ -119,15 +138,26 @@ export function KanbanBoard({ tareas: initial }: { tareas: TareaConRelaciones[] 
 
       {pendiente && (
         <ConfirmModal
-          titulo={pendiente.tipo === "eliminar" ? "Eliminar tarea" : pendiente.tipo === "archivar" ? "Archivar tarea" : "Archivar completadas"}
+          titulo={
+            pendiente.tipo === "eliminar" ? "Eliminar tarea"
+              : pendiente.tipo === "archivar" ? "Archivar tarea"
+                : pendiente.tipo === "completar" ? "Marcar como completada"
+                  : "Archivar completadas"
+          }
           mensaje={
             pendiente.tipo === "eliminar"
               ? `¿Eliminar «${pendiente.titulo}»? Esta acción no se puede deshacer.`
               : pendiente.tipo === "archivar"
                 ? `¿Archivar «${pendiente.titulo}»? Pasará al Archivo y saldrá del tablero.`
-                : `¿Archivar las ${pendiente.n} tareas completadas?`
+                : pendiente.tipo === "completar"
+                  ? `«${pendiente.titulo}» tiene ${pendiente.n} subtarea(s) sin completar. ¿Marcarla como completada de todos modos?`
+                  : `¿Archivar las ${pendiente.n} tareas completadas?`
           }
-          confirmLabel={pendiente.tipo === "eliminar" ? "Eliminar" : "Archivar"}
+          confirmLabel={
+            pendiente.tipo === "eliminar" ? "Eliminar"
+              : pendiente.tipo === "completar" ? "Completar"
+                : "Archivar"
+          }
           danger={pendiente.tipo === "eliminar"}
           pending={procesando}
           onConfirm={confirmar}

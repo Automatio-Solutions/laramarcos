@@ -100,6 +100,8 @@ export interface Tarea {
 export interface TareaConRelaciones extends Tarea {
   cliente_nombre: string | null;
   responsable_nombre: string | null;
+  subtareas_pendientes: number;
+  bloqueada_por: string[]; // nombres de asignados con subtarea vencida sin completar
 }
 
 export interface Subtarea {
