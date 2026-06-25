@@ -4,7 +4,56 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { validateCliente, hasErrors, type FieldErrors } from "@/lib/validators/cliente";
-import type { ClienteInput } from "@/lib/types";
+import type { ClienteInput, Sector } from "@/lib/types";
+
+export type CrearSectorResult =
+  | { ok: true; sector: Sector }
+  | { ok: false; error: string };
+
+/**
+ * Crea un sector nuevo desde la ficha de cliente. Si ya existe uno con el
+ * mismo nombre (insensible a mayúsculas/acentos del usuario), lo reutiliza en
+ * lugar de fallar, para que el sector quede igualmente seleccionable.
+ */
+export async function crearSectorAction(nombre: string): Promise<CrearSectorResult> {
+  const limpio = nombre.trim();
+  if (!limpio) return { ok: false, error: "Escribe un nombre de sector." };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Sesión no válida." };
+
+  const { data, error } = await supabase
+    .from("sectores")
+    .insert({ nombre: limpio })
+    .select("id,nombre")
+    .single();
+
+  if (!error) {
+    revalidatePath("/clientes");
+    return { ok: true, sector: data as Sector };
+  }
+
+  // 23505 = ya existe un sector con ese nombre → lo reutilizamos.
+  if (error.code === "23505") {
+    const { data: existente } = await supabase
+      .from("sectores")
+      .select("id,nombre")
+      .ilike("nombre", limpio)
+      .single();
+    if (existente) return { ok: true, sector: existente as Sector };
+    return { ok: false, error: "Ese sector ya existe." };
+  }
+
+  // 42501 = RLS / permisos insuficientes (solo staff puede crear sectores).
+  if (error.code === "42501") {
+    return { ok: false, error: "No tienes permisos para crear sectores." };
+  }
+
+  return { ok: false, error: error.message };
+}
 
 export interface ClienteFormState {
   ok: boolean;

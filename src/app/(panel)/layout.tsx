@@ -1,4 +1,5 @@
 import { logoutAction } from "@/app/login/actions";
+import { Logo } from "@/components/Logo";
 import { PanelNav } from "@/components/PanelNav";
 import { NotificacionesBell } from "@/components/NotificacionesBell";
 import { listNotificaciones, countNoLeidas } from "@/lib/repos/notificaciones";
@@ -20,8 +21,7 @@ export default async function PanelLayout({
     <div className="flex min-h-screen">
       <aside className="flex w-64 flex-col bg-primary text-white">
         <div className="border-b border-white/10 px-6 py-5">
-          <p className="text-lg font-bold">LaraMarcos</p>
-          <p className="text-xs text-white/60">Asesores</p>
+          <Logo className="h-11 w-auto text-white" />
         </div>
         <PanelNav esStaff={esStaff} />
         <form action={logoutAction} className="border-t border-white/10 p-3">

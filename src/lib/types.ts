@@ -1,5 +1,16 @@
 export type Rol = "responsable" | "asesor" | "admin";
 
+export const ROLES: Rol[] = ["responsable", "asesor", "admin"];
+
+export const ROL_LABEL: Record<Rol, string> = {
+  responsable: "Responsable",
+  asesor: "Asesor",
+  admin: "Administrador",
+};
+
+export const OFICINAS = ["Badajoz", "Castuera", "Don Benito"] as const;
+export type Oficina = (typeof OFICINAS)[number];
+
 export interface Sector {
   id: string;
   nombre: string;
@@ -10,6 +21,21 @@ export interface Usuario {
   nombre: string;
   email: string;
   rol: Rol;
+}
+
+/** Usuario con los campos de gestión (apartado Usuarios, solo staff). */
+export interface UsuarioDetalle extends Usuario {
+  activo: boolean;
+  oficina: Oficina | null;
+  created_at: string;
+}
+
+/** Datos del formulario de alta/edición de usuario. */
+export interface UsuarioInput {
+  nombre: string;
+  email: string;
+  rol: Rol;
+  oficina?: Oficina | null;
 }
 
 export interface Cliente {
