@@ -17,6 +17,8 @@ export interface Cliente {
   cif: string;
   razon_social: string;
   direccion: string | null;
+  ciudad: string | null;
+  codigo_postal: string | null;
   email: string | null;
   telefono: string | null;
   iban: string | null;
@@ -157,6 +159,8 @@ export interface ClienteInput {
   cif: string;
   razon_social: string;
   direccion?: string;
+  ciudad?: string;
+  codigo_postal?: string;
   email?: string;
   telefono?: string;
   iban?: string;

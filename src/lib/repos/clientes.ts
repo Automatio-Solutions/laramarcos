@@ -10,6 +10,8 @@ interface ClienteRow {
   cif: string;
   razon_social: string;
   direccion: string | null;
+  ciudad: string | null;
+  codigo_postal: string | null;
   email: string | null;
   telefono: string | null;
   iban: string | null;
@@ -28,6 +30,8 @@ function mapCliente(row: ClienteRow): ClienteConRelaciones {
     cif: row.cif,
     razon_social: row.razon_social,
     direccion: row.direccion,
+    ciudad: row.ciudad,
+    codigo_postal: row.codigo_postal,
     email: row.email,
     telefono: row.telefono,
     iban: row.iban,
