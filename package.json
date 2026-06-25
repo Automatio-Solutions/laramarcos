@@ -19,7 +19,8 @@
     "db:facturacion-test": "node scripts/facturacion-test.mjs",
     "db:verify": "node scripts/db-apply.mjs && node scripts/rls-test.mjs",
     "db:presupuestos-test": "node scripts/presupuestos-test.mjs",
-    "db:ocr-test": "node scripts/ocr-test.mjs"
+    "db:ocr-test": "node scripts/ocr-test.mjs",
+    "seed:demo": "node scripts/seed-demo.mjs"
   },
   "dependencies": {
     "next": "16.2.9",
