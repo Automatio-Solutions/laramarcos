@@ -24,7 +24,7 @@ export function Modal({ children }: { children: React.ReactNode }) {
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="relative my-4 w-full max-w-3xl rounded-lg border border-border bg-surface p-6 shadow-xl sm:my-8 sm:p-8"
+        className="relative my-4 w-full max-w-5xl rounded-lg border border-border bg-surface p-6 shadow-xl sm:my-8 sm:p-8"
       >
         <button
           onClick={() => router.back()}

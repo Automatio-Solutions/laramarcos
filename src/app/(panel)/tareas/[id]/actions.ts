@@ -64,6 +64,14 @@ export async function eliminarSubtareaAction(tareaId: string, subtareaId: string
 // ---- UC-104: el bloqueo es AUTOMÁTICO (subtareas vencidas sin completar);
 //      se calcula en la capa de lectura (repos/tareas.ts y TareaDetalleView), no hay acción manual. ----
 
+/** Guarda la descripción / notas libres de la tarea. */
+export async function updateDescripcionAction(tareaId: string, formData: FormData) {
+  const descripcion = String(formData.get("descripcion") ?? "").trim() || null;
+  const supabase = await createClient();
+  await supabase.from("tareas").update({ descripcion }).eq("id", tareaId);
+  rev(tareaId);
+}
+
 // ---- UC-105: comentarios con @menciones ----
 export async function addComentarioAction(tareaId: string, formData: FormData) {
   const texto = String(formData.get("texto") ?? "").trim();

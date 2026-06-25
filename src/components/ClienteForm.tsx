@@ -62,6 +62,11 @@ export function ClienteForm({
 
       <Field label="Dirección" name="direccion" defaultValue={cliente?.direccion} onBlur={onBlur} />
 
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Ciudad" name="ciudad" defaultValue={cliente?.ciudad} onBlur={onBlur} />
+        <Field label="Código postal" name="codigo_postal" defaultValue={cliente?.codigo_postal} onBlur={onBlur} placeholder="06001" />
+      </div>
+
       <label className="block space-y-1">
         <span className="text-sm font-medium text-fg">Asesor asignado</span>
         <select
