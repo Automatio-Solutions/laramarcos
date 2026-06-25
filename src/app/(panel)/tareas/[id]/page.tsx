@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
 import { getTareaDetalle } from "@/lib/repos/tarea-detalle";
 import { listTareas } from "@/lib/repos/tareas";
 import { listAsesores } from "@/lib/repos/clientes";
+import { subirAdjuntoAction, borrarAdjuntoAction } from "./adjuntos-actions";
 import { ESTADO_LABEL } from "@/lib/estados";
 import { EstadoSelect } from "@/components/EstadoSelect";
 import {
@@ -18,8 +20,10 @@ function fmtTiempo(seg: number): string {
 
 export default async function TareaDetallePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [detalle, asesores, todasTareas] = await Promise.all([
+  const supabase = await createClient();
+  const [detalle, asesores, todasTareas, { data: adjuntos }] = await Promise.all([
     getTareaDetalle(id), listAsesores(), listTareas(),
+    supabase.from("adjuntos").select("id, nombre, mime, size, path").eq("tarea_id", id).order("created_at"),
   ]);
   if (!detalle) notFound();
   const { tarea, subtareas, comentarios, tiempos, segundosTotal, dependencias } = detalle;
@@ -117,6 +121,28 @@ export default async function TareaDetallePage({ params }: { params: Promise<{ i
           <input name="nota" placeholder="Nota (opcional)" className="flex-1 rounded-md border border-border bg-surface px-3 py-2 text-sm text-fg" />
           <button className="rounded-md border border-border px-4 py-2 text-sm font-medium text-fg hover:bg-surface-raised">Registrar</button>
         </form>
+      </section>
+
+      {/* Adjuntos (UC-106) */}
+      <section className="space-y-3">
+        <h2 className="font-semibold text-fg">Adjuntos</h2>
+        <ul className="space-y-1 text-sm">
+          {(adjuntos ?? []).length === 0 && <li className="text-fg-muted">Sin adjuntos.</li>}
+          {((adjuntos ?? []) as { id: string; nombre: string; size: number | null; path: string }[]).map((a) => (
+            <li key={a.id} className="flex items-center justify-between rounded-md border border-border bg-surface px-3 py-2">
+              <a href={`/api/adjuntos/${a.id}`} target="_blank" rel="noopener" className="text-accent hover:underline">📎 {a.nombre}</a>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-fg-muted">{a.size ? `${Math.round(a.size / 1024)} KB` : ""}</span>
+                <form action={borrarAdjuntoAction.bind(null, a.id, id, a.path)}><button className="text-xs text-error hover:underline">borrar</button></form>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <form action={subirAdjuntoAction.bind(null, id)} className="flex items-center gap-2">
+          <input type="file" name="archivo" required className="text-sm text-fg" />
+          <button className="rounded-md border border-border px-4 py-2 text-sm font-medium text-fg hover:bg-surface-raised">Adjuntar</button>
+        </form>
+        <p className="text-xs text-fg-muted">PDF, Excel, escáneres o contratos. Accesibles desde la tarea, sin reenvíos por correo.</p>
       </section>
 
       {/* Comentarios + @menciones (UC-105) */}
