@@ -108,6 +108,8 @@ export async function getTareaDetalle(id: string): Promise<TareaDetalle | null> 
     created_at: t.created_at as string,
     cliente_nombre: (t.cliente as { razon_social: string } | null)?.razon_social ?? null,
     responsable_nombre: (t.responsable as { nombre: string } | null)?.nombre ?? null,
+    subtareas_pendientes: 0,
+    bloqueada_por: [],
   };
 
   const [subRes, comRes, tiempoRes, depRes] = await Promise.all([

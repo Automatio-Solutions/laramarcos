@@ -4,7 +4,7 @@ import { listClientes, listAsesores } from "@/lib/repos/clientes";
 import { KanbanBoard } from "@/components/KanbanBoard";
 import { ListaTareas } from "@/components/ListaTareas";
 import { CalendarioMensual } from "@/components/CalendarioMensual";
-import { ESTADOS } from "@/lib/estados";
+import { ESTADOS_TABLERO } from "@/lib/estados";
 
 type View = "kanban" | "lista" | "calendario";
 type SP = TareaFiltros & { view?: View; mes?: string };
@@ -64,7 +64,7 @@ export default async function TareasPage({ searchParams }: { searchParams: Promi
         </select>
         <select name="estado" defaultValue={sp.estado ?? ""} className="rounded-md border border-border bg-surface px-2 py-2 text-fg">
           <option value="">Estado</option>
-          {ESTADOS.map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}
+          {ESTADOS_TABLERO.map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}
         </select>
         <input name="categoria" defaultValue={sp.categoria ?? ""} placeholder="Categoría" className="w-32 rounded-md border border-border bg-surface px-2 py-2 text-fg" />
         <input type="date" name="desde" defaultValue={sp.desde ?? ""} className="rounded-md border border-border bg-surface px-2 py-2 text-fg" />

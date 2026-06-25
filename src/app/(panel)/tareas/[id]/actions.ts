@@ -61,32 +61,8 @@ export async function eliminarSubtareaAction(tareaId: string, subtareaId: string
   rev(tareaId);
 }
 
-// ---- UC-104: bloqueo por terceros ----
-export async function toggleBloqueoAction(tareaId: string, formData: FormData) {
-  const motivo = String(formData.get("motivo") ?? "").trim();
-  const supabase = await createClient();
-  const { data: t } = await supabase.from("tareas").select("bloqueada, responsable_id, titulo").eq("id", tareaId).maybeSingle();
-  const bloquear = !t?.bloqueada;
-  await supabase
-    .from("tareas")
-    .update({
-      bloqueada: bloquear,
-      motivo_bloqueo: bloquear ? motivo || "Bloqueada" : null,
-      estado: bloquear ? "bloqueada" : "pendiente",
-    })
-    .eq("id", tareaId);
-
-  // AC-10: al desbloquear, avisar al responsable
-  if (!bloquear && t?.responsable_id) {
-    await supabase.rpc("crear_notificacion", {
-      p_usuario: t.responsable_id,
-      p_tipo: "desbloqueo",
-      p_mensaje: `Tarea desbloqueada: ${t.titulo}`,
-      p_enlace: `/tareas/${tareaId}`,
-    });
-  }
-  rev(tareaId);
-}
+// ---- UC-104: el bloqueo es AUTOMÁTICO (subtareas vencidas sin completar);
+//      se calcula en la capa de lectura (repos/tareas.ts y TareaDetalleView), no hay acción manual. ----
 
 // ---- UC-105: comentarios con @menciones ----
 export async function addComentarioAction(tareaId: string, formData: FormData) {

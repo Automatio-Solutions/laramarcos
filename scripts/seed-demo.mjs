@@ -102,7 +102,6 @@ async function main() {
   }
 
   console.log("→ tareas + subtareas…");
-  const estados = ["pendiente", "en_curso", "bloqueada", "completada"];
   const tareasDefs = [
     ["Cierre trimestral IVA 2T", clientes[0], -2, "completada", "Fiscal"],
     ["Constitución SL nuevo socio", clientes[2], 7, "en_curso", "Mercantil"],
@@ -110,7 +109,7 @@ async function main() {
     ["Plan de viabilidad apertura local", clientes[1], 12, "en_curso", "Consultoría"],
     ["Renta 2025 socios", clientes[8], 20, "pendiente", "Fiscal"],
     ["Alta autónomo nuevo empleado", clientes[7], -1, "completada", "Laboral"],
-    ["Contabilidad mayo", clientes[6], 5, "bloqueada", "Contable"],
+    ["Contabilidad mayo", clientes[6], 5, "en_curso", "Contable"],
     ["Subvención hostelería DOE", clientes[0], 3, "pendiente", "Subvenciones"],
     ["Declaración IVA mensual", clientes[4], -5, "completada", "Fiscal"],
     ["Revisión contrato alquiler", clientes[9], 9, "en_curso", "Mercantil"],
@@ -120,7 +119,7 @@ async function main() {
     const { data } = await a.from("tareas").insert({
       titulo, cliente_id: cli.id, responsable_id: cli.asesor, vencimiento: d(venc),
       estado, categoria: cat, completada_at: estado === "completada" ? new Date().toISOString() : null,
-      bloqueada: estado === "bloqueada", motivo_bloqueo: estado === "bloqueada" ? "Bloqueada por cliente (faltan datos)" : null,
+      bloqueada: false, motivo_bloqueo: null,
     }).select("id").single();
     tareas.push({ id: data.id, cli, estado });
   }
@@ -131,6 +130,9 @@ async function main() {
     { tarea_id: tareas[1].id, titulo: "Alta en Seguridad Social", plazo: d(5), estado: "pendiente", orden: 3 },
     { tarea_id: tareas[3].id, titulo: "Recopilación de datos", asignado_id: tareas[3].cli.asesor, plazo: d(0), estado: "completada", orden: 1 },
     { tarea_id: tareas[3].id, titulo: "Modelo financiero", asignado_id: tareas[3].cli.asesor, plazo: d(5), estado: "en_curso", orden: 2 },
+    // Subtarea VENCIDA sin completar → bloqueo automático ("Bloqueada por: …")
+    { tarea_id: tareas[6].id, titulo: "Conciliación bancaria mayo", asignado_id: tareas[6].cli.asesor, plazo: d(-3), estado: "en_curso", orden: 1 },
+    { tarea_id: tareas[6].id, titulo: "Asientos de amortización", asignado_id: tareas[6].cli.asesor, plazo: d(2), estado: "pendiente", orden: 2 },
   ]);
   // Líneas de factura para las completadas
   for (const t of tareas.filter((x) => x.estado === "completada")) {

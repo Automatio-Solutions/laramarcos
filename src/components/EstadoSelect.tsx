@@ -1,6 +1,6 @@
 "use client";
 
-import { ESTADOS } from "@/lib/estados";
+import { ESTADOS_TABLERO } from "@/lib/estados";
 import type { EstadoTarea } from "@/lib/types";
 
 export function EstadoSelect({
@@ -16,7 +16,7 @@ export function EstadoSelect({
       onChange={(e) => action(e.target.value)}
       className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-fg"
     >
-      {ESTADOS.map((s) => (
+      {ESTADOS_TABLERO.map((s) => (
         <option key={s.key} value={s.key}>{s.label}</option>
       ))}
     </select>

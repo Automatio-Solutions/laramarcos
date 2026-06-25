@@ -26,7 +26,14 @@ export function ListaTareas({ tareas }: { tareas: TareaConRelaciones[] }) {
               onClick={() => router.push(`/tareas/${t.id}`)}
               className="cursor-pointer border-t border-border hover:bg-surface-raised"
             >
-              <td className="px-4 py-3 font-medium text-fg">{t.titulo}</td>
+              <td className="px-4 py-3 font-medium text-fg">
+                {t.titulo}
+                {t.bloqueada_por.length > 0 && (
+                  <span className="ml-2 inline-block rounded bg-error/10 px-1.5 py-0.5 text-[11px] font-medium text-error">
+                    🔒 Bloqueada por: {t.bloqueada_por.join(", ")}
+                  </span>
+                )}
+              </td>
               <td className="px-4 py-3 text-fg-muted">{t.cliente_nombre ?? "—"}</td>
               <td className="px-4 py-3 text-fg-muted">{t.responsable_nombre ?? "—"}</td>
               <td className="px-4 py-3 text-fg">{ESTADO_LABEL[t.estado]}</td>

@@ -11,7 +11,7 @@ import { ESTADO_LABEL } from "@/lib/estados";
 import { EstadoSelect } from "@/components/EstadoSelect";
 import {
   addSubtareaAction, asignarSubtareaAction, setEstadoSubtareaAction, eliminarSubtareaAction,
-  toggleBloqueoAction, addComentarioAction, addDependenciaAction,
+  addComentarioAction, addDependenciaAction,
   removeDependenciaAction, addTiempoAction,
 } from "@/app/(panel)/tareas/[id]/actions";
 
@@ -32,13 +32,27 @@ export async function TareaDetalleView({ id, enModal = false }: { id: string; en
   const otras = todasTareas.filter((t) => t.id !== id);
   const depIds = new Set(dependencias.map((d) => d.depende_de_id));
 
+  // Bloqueo AUTOMÁTICO: subtareas asignadas, vencidas (plazo pasado) y sin completar.
+  const hoy = new Date().toISOString().slice(0, 10);
+  const bloqueadaPor = [
+    ...new Set(
+      subtareas
+        .filter((s) => s.estado !== "completada" && s.plazo && s.plazo < hoy)
+        .map((s) => s.asignado_nombre ?? "Sin asignar"),
+    ),
+  ];
+
   return (
     <div className="space-y-8">
       <header>
         {!enModal && <Link href="/tareas" className="text-sm text-fg-muted hover:underline">← Tareas</Link>}
-        <div className="mt-1 flex items-center gap-3">
+        <div className="mt-1 flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-bold text-primary">{tarea.titulo}</h1>
-          {tarea.bloqueada && <span className="rounded-md bg-error/10 px-2 py-0.5 text-xs font-medium text-error">Bloqueada</span>}
+          {bloqueadaPor.length > 0 && (
+            <span className="rounded-md bg-error/10 px-2 py-0.5 text-xs font-medium text-error">
+              🔒 Bloqueada por: {bloqueadaPor.join(", ")}
+            </span>
+          )}
         </div>
         <p className="text-sm text-fg-muted">
           {ESTADO_LABEL[tarea.estado]}{tarea.cliente_nombre ? ` · ${tarea.cliente_nombre}` : ""}
@@ -48,14 +62,13 @@ export async function TareaDetalleView({ id, enModal = false }: { id: string; en
         {tarea.descripcion && <p className="mt-3 text-sm text-fg">{tarea.descripcion}</p>}
       </header>
 
-      {/* Bloqueo (UC-104) */}
-      <form action={toggleBloqueoAction.bind(null, id)} className="flex items-center gap-2 rounded-lg border border-border bg-surface p-3">
-        {!tarea.bloqueada && <input name="motivo" placeholder="Motivo (bloqueada por cliente / persona…)" className="flex-1 rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-fg" />}
-        {tarea.bloqueada && <span className="flex-1 text-sm text-fg-muted">Motivo: {tarea.motivo_bloqueo}</span>}
-        <button className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-fg hover:bg-surface-raised">
-          {tarea.bloqueada ? "Desbloquear" : "Bloquear"}
-        </button>
-      </form>
+      {/* Bloqueo AUTOMÁTICO (UC-104): se deriva de subtareas vencidas sin completar. */}
+      {bloqueadaPor.length > 0 && (
+        <div className="rounded-lg border border-error/30 bg-error/5 p-3 text-sm text-fg">
+          🔒 Esta tarea está <strong>bloqueada</strong> porque hay subtareas vencidas sin completar a cargo de{" "}
+          <strong>{bloqueadaPor.join(", ")}</strong>. Se desbloqueará automáticamente al completarlas.
+        </div>
+      )}
 
       {/* Subtareas (UC-102) */}
       <section className="space-y-3">
