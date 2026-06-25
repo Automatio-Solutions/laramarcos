@@ -28,7 +28,7 @@ export async function TareaDetalleView({ id, enModal = false }: { id: string; en
     supabase.from("adjuntos").select("id, nombre, mime, size, path").eq("tarea_id", id).order("created_at"),
   ]);
   if (!detalle) notFound();
-  const { tarea, subtareas, comentarios, tiempos, segundosTotal, dependencias } = detalle;
+  const { tarea, subtareas, comentarios, tiempos, segundosTotal, dependencias, actividad } = detalle;
   const otras = todasTareas.filter((t) => t.id !== id);
   const depIds = new Set(dependencias.map((d) => d.depende_de_id));
 
@@ -167,6 +167,23 @@ export async function TareaDetalleView({ id, enModal = false }: { id: string; en
           <input name="texto" placeholder="Escribe un comentario… usa @nombre para mencionar" className="flex-1 rounded-md border border-border bg-surface px-3 py-2 text-sm text-fg" />
           <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-primary-hover)]">Comentar</button>
         </form>
+      </section>
+
+      {/* Registro de actividad */}
+      <section className="space-y-3">
+        <h2 className="font-semibold text-fg">Registro de actividad</h2>
+        <ol className="space-y-2 border-l-2 border-border pl-4 text-sm">
+          {actividad.length === 0 && <li className="text-fg-muted">Sin actividad registrada.</li>}
+          {actividad.map((ev, i) => (
+            <li key={i} className="relative">
+              <span className="absolute -left-[21px] top-0.5 text-xs">{ev.icono}</span>
+              <p className="text-fg">
+                <span className="font-medium">{ev.usuario_nombre ?? "—"}</span> · {ev.texto}
+              </p>
+              <p className="text-xs text-fg-muted">{new Date(ev.ts).toLocaleString("es-ES")}</p>
+            </li>
+          ))}
+        </ol>
       </section>
     </div>
   );

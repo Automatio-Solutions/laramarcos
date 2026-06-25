@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: "📊" },
   { href: "/tareas", label: "Tareas", icon: "✅" },
+  { href: "/archivo", label: "Archivo", icon: "🗄️", staff: true },
   { href: "/clientes", label: "Clientes", icon: "👥" },
   { href: "/presupuestos", label: "Presupuestos", icon: "🧾" },
   { href: "/facturacion", label: "Facturación", icon: "💸" },
@@ -18,11 +19,11 @@ const NAV = [
   { href: "/auditoria", label: "Auditoría", icon: "📋" },
 ];
 
-export function PanelNav() {
+export function PanelNav({ esStaff = false }: { esStaff?: boolean }) {
   const pathname = usePathname();
   return (
     <nav className="flex-1 space-y-1 p-3">
-      {NAV.map((item) => {
+      {NAV.filter((item) => !item.staff || esStaff).map((item) => {
         const active = pathname.startsWith(item.href);
         return (
           <Link
