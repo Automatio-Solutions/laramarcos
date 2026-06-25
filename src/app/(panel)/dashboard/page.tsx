@@ -19,11 +19,10 @@ export default async function DashboardPage() {
         <p className="text-sm text-fg-muted">Carga del equipo, vencidas, tiempo de resolución y cumplimiento de SLA</p>
       </header>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-3">
         <Kpi label="Tareas abiertas" value={String(m.totalAbiertas)} />
         <Kpi label="Vencidas" value={String(m.totalVencidas)} tone={m.totalVencidas ? "text-error" : "text-primary"} />
         <Kpi label="Tiempo medio resolución" value={m.tiempoMedioDias != null ? `${m.tiempoMedioDias} d` : "—"} />
-        <Kpi label="Cumplimiento SLA" value={m.cumplimientoSla != null ? `${m.cumplimientoSla}%` : "—"} tone="text-success" />
       </div>
 
       <section className="space-y-3">
