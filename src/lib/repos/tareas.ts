@@ -85,10 +85,13 @@ export async function listTareas(f: TareaFiltros = {}): Promise<TareaConRelacion
 }
 
 /** Tareas archivadas (apartado Archivo). */
-export async function listTareasArchivadas(): Promise<TareaConRelaciones[]> {
+export async function listTareasArchivadas(desde?: string, hasta?: string): Promise<TareaConRelaciones[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase
+  let q = supabase
     .from("tareas").select(SELECT).eq("archivada", true).order("vencimiento", { ascending: false, nullsFirst: false });
+  if (desde) q = q.gte("created_at", desde);
+  if (hasta) q = q.lt("created_at", `${hasta}T23:59:59.999Z`);
+  const { data, error } = await q;
   if (error) throw error;
   return (data as unknown as TareaRow[]).map(mapRow);
 }
