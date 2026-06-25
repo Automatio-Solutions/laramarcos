@@ -1,14 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ESTADOS } from "@/lib/estados";
 import { updateEstadoTareaAction } from "@/app/(panel)/tareas/actions";
 import type { TareaConRelaciones, EstadoTarea } from "@/lib/types";
 
 export function KanbanBoard({ tareas: initial }: { tareas: TareaConRelaciones[] }) {
+  const router = useRouter();
   const [tareas, setTareas] = useState(initial);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [arrastrando, setArrastrando] = useState(false);
 
   async function onDrop(estado: EstadoTarea) {
     if (!dragId) return;
@@ -38,12 +40,12 @@ export function KanbanBoard({ tareas: initial }: { tareas: TareaConRelaciones[] 
                 <article
                   key={t.id}
                   draggable
-                  onDragStart={() => setDragId(t.id)}
-                  className="cursor-grab rounded-md border border-border bg-surface p-3 shadow-sm active:cursor-grabbing"
+                  onDragStart={() => { setDragId(t.id); setArrastrando(true); }}
+                  onDragEnd={() => setTimeout(() => setArrastrando(false), 0)}
+                  onClick={() => { if (!arrastrando) router.push(`/tareas/${t.id}`); }}
+                  className="cursor-pointer rounded-md border border-border bg-surface p-3 shadow-sm transition hover:border-accent active:cursor-grabbing"
                 >
-                  <Link href={`/tareas/${t.id}`} className="block text-sm font-medium text-fg hover:text-accent">
-                    {t.titulo}
-                  </Link>
+                  <p className="text-sm font-medium text-fg">{t.titulo}</p>
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-fg-muted">
                     {t.cliente_nombre && <span>{t.cliente_nombre}</span>}
                     {t.vencimiento && <span>· {new Date(t.vencimiento).toLocaleDateString("es-ES")}</span>}
