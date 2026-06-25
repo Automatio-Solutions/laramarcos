@@ -3,7 +3,13 @@ import { PanelNav } from "@/components/PanelNav";
 import { NotificacionesBell } from "@/components/NotificacionesBell";
 import { listNotificaciones, countNoLeidas } from "@/lib/repos/notificaciones";
 
-export default async function PanelLayout({ children }: { children: React.ReactNode }) {
+export default async function PanelLayout({
+  children,
+  modal,
+}: {
+  children: React.ReactNode;
+  modal: React.ReactNode;
+}) {
   const [notificaciones, noLeidas] = await Promise.all([listNotificaciones(), countNoLeidas()]);
   return (
     <div className="flex min-h-screen">
@@ -25,6 +31,7 @@ export default async function PanelLayout({ children }: { children: React.ReactN
         </div>
         {children}
       </main>
+      {modal}
     </div>
   );
 }
