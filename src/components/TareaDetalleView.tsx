@@ -69,9 +69,9 @@ export async function TareaDetalleView({ id, enModal = false }: { id: string; en
         </div>
       )}
 
-      <div className="grid gap-8 lg:grid-cols-3">
+      <div className="grid gap-8 lg:grid-cols-5">
         {/* ----- Columna izquierda: contenido de la tarea ----- */}
-        <div className="space-y-8 lg:col-span-2">
+        <div className="space-y-8 lg:col-span-3">
           {/* Descripción / notas libres */}
           <section className="space-y-3">
             <h2 className="font-semibold text-fg">Descripción</h2>
@@ -188,13 +188,15 @@ export async function TareaDetalleView({ id, enModal = false }: { id: string; en
         </div>
 
         {/* ----- Columna derecha: comentarios + registro de actividad ----- */}
-        <div className="space-y-8">
+        <div className="space-y-8 lg:col-span-2 lg:border-l lg:border-border lg:pl-8">
           {/* Comentarios + @menciones (UC-105) */}
           <section className="space-y-3">
             <h2 className="font-semibold text-fg">Comentarios</h2>
-            <form action={addComentarioAction.bind(null, id)} className="flex gap-2">
-              <input name="texto" placeholder="Comentario… usa @nombre para mencionar" className="flex-1 rounded-md border border-border bg-surface px-3 py-2 text-sm text-fg" />
-              <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-primary-hover)]">Enviar</button>
+            <form action={addComentarioAction.bind(null, id)} className="space-y-2">
+              <input name="texto" placeholder="Escribe un comentario… usa @nombre para mencionar" className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-fg" />
+              <div className="flex justify-end">
+                <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-primary-hover)]">Enviar</button>
+              </div>
             </form>
             <ul className="space-y-3">
               {comentarios.map((c) => (
