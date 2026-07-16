@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { clasificarPorSector, esUrgente, resumenAccionable, type SectorRef } from "./clasificar";
+import { clasificarLote } from "./clasificar-ia";
+import type { SectorRef } from "./clasificar";
 
 export interface ItemBoletin {
   boletin: string; // DOE | BOE
@@ -25,12 +26,12 @@ export async function procesarBoletines(
   const { data: sectoresData } = await admin.from("sectores").select("id, nombre");
   const sectores = (sectoresData ?? []) as SectorRef[];
 
-  // 1) Clasificar + guardar (solo cuentan las realmente nuevas)
+  // 1) Clasificar (Claude en un solo lote; sin clave o si falla → palabras clave)
+  //    y guardar. Solo cuentan las publicaciones realmente nuevas.
+  const clasif = await clasificarLote(items, sectores);
   const nuevas: { id: string; titulo: string; resumen: string; enlace: string | null; sector_id: string | null; urgente: boolean }[] = [];
-  for (const it of items) {
-    const sector_id = clasificarPorSector(it, sectores);
-    const urgente = esUrgente(it);
-    const resumen = resumenAccionable(it);
+  for (const [i, it] of items.entries()) {
+    const { sector_id, urgente, resumen } = clasif[i];
     const { data } = await admin
       .from("publicaciones")
       .upsert(

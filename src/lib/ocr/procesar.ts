@@ -1,5 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { MODELO_CLAUDE } from "@/lib/ia/claude";
 import type { FacturaDatos } from "./core";
 
 export interface ResultadoOCR extends FacturaDatos {
@@ -28,14 +29,13 @@ export async function procesarFactura(
     try {
       const { default: Anthropic } = await import("@anthropic-ai/sdk");
       const client = new Anthropic({ apiKey: key });
-      const model = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
       const source = mime === "application/pdf"
         ? { type: "document" as const, source: { type: "base64" as const, media_type: "application/pdf" as const, data: base64 } }
         : { type: "image" as const, source: { type: "base64" as const, media_type: mime as "image/jpeg" | "image/png", data: base64 } };
 
       const msg = await client.messages.create({
-        model,
-        max_tokens: 1024,
+        model: MODELO_CLAUDE,
+        max_tokens: 4096,
         tools: [{
           name: "extraer_factura",
           description: "Extrae los datos contables de la factura. Si un dato no aparece, déjalo null. Si pone 'IVA reducido' sin número, usa 10. Devuelve confianza 0-100.",
@@ -70,8 +70,10 @@ export async function procesarFactura(
         confianza = Math.max(0, Math.min(100, out.confianza ?? 0));
         motor = "claude";
       }
-    } catch {
-      // fallo de API → fila manual
+    } catch (e) {
+      // Fallo de API → fila manual (semáforo rojo). Se registra para que un
+      // modelo mal configurado o una clave sin saldo no pasen desapercibidos.
+      console.error("[M4] Claude falló al leer la factura, queda para revisión manual:", e);
       datos = { ...VACIO };
       confianza = 0;
       motor = "manual";

@@ -1,5 +1,6 @@
 // Clasificación de publicaciones DOE/BOE por sector + urgencia (UC-302/303).
-// Fallback determinista por palabras clave (cuando hay ANTHROPIC_API_KEY se usa Claude).
+// Respaldo determinista por palabras clave. La clasificación con Claude vive en
+// ./clasificar-ia.ts (clasificarLote), que cae aquí si no hay clave o si falla.
 
 export interface SectorRef { id: string; nombre: string; }
 export interface PublicacionRaw { titulo: string; resumen?: string; enlace?: string; }
@@ -36,7 +37,7 @@ export function esUrgente(pub: PublicacionRaw): boolean {
   return PALABRAS_URGENTES.some((k) => t.includes(k));
 }
 
-/** Resumen accionable simple (template). Con Claude se redacta en lenguaje claro. */
+/** Resumen accionable simple (plantilla). Con Claude se redacta en lenguaje claro. */
 export function resumenAccionable(pub: PublicacionRaw): string {
   const partes = [pub.titulo.trim()];
   if (esUrgente(pub)) partes.push("Acción requerida: revisa el plazo o la obligación indicada.");
