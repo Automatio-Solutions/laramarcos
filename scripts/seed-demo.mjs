@@ -20,20 +20,21 @@ function genCif() {
   return "B" + digits + ((10 - ((odd + even) % 10)) % 10);
 }
 
-async function ensureUser(email, nombre, rol) {
+async function ensureUser(email, nombre, rol, oficina = null) {
   let id;
   const { data, error } = await a.auth.admin.createUser({ email, password: "laramarcos2026", email_confirm: true });
   if (error && !/already/i.test(error.message)) throw error;
   id = data?.user?.id;
   if (!id) { const { data: list } = await a.auth.admin.listUsers(); id = list.users.find((u) => u.email === email)?.id; }
-  await a.from("usuarios").upsert({ id, email, nombre, rol, activo: true });
+  await a.from("usuarios").upsert({ id, email, nombre, rol, oficina, activo: true });
   return id;
 }
 
 async function wipe() {
   const tablas = ["notificaciones", "newsletters", "publicaciones", "ingesta_log", "facturas_ocr", "lineas_factura",
     "adjuntos", "presupuestos_recurrentes", "presupuestos", "comentarios", "tiempos", "dependencias_tarea",
-    "subtareas", "tareas", "plantillas_subtareas", "cliente_sectores", "clientes", "servicios", "proveedores", "sectores"];
+    "subtareas", "tareas", "plantillas_subtareas", "cliente_servicio_cuotas", "cliente_servicios",
+    "cliente_cuentas", "cliente_sectores", "clientes", "servicios", "proveedores", "sectores"];
   for (const t of tablas) await a.from(t).delete().neq("id", "00000000-0000-0000-0000-000000000000");
 }
 
@@ -42,11 +43,12 @@ async function main() {
   await wipe();
 
   console.log("→ usuarios (login: <email> / laramarcos2026)…");
-  const resp = await ensureUser("admin@laramarcos.es", "Responsable LaraMarcos", "responsable");
-  const ana = await ensureUser("ana@laramarcos.es", "Ana Belén Cordero", "asesor");
-  const carlos = await ensureUser("carlos@laramarcos.es", "Carlos Núñez", "asesor");
-  const lucia = await ensureUser("lucia@laramarcos.es", "Lucía Ferrer", "asesor");
-  await ensureUser("marta@laramarcos.es", "Marta Gil (admin)", "admin");
+  // Cada asesor pertenece a una sede: solo verá la cartera de su oficina.
+  const resp = await ensureUser("admin@laramarcos.es", "Responsable LaraMarcos", "responsable", "Badajoz");
+  const ana = await ensureUser("ana@laramarcos.es", "Ana Belén Cordero", "asesor", "Badajoz");
+  const carlos = await ensureUser("carlos@laramarcos.es", "Carlos Núñez", "asesor", "Don Benito");
+  const lucia = await ensureUser("lucia@laramarcos.es", "Lucía Ferrer", "asesor", "Castuera");
+  await ensureUser("marta@laramarcos.es", "Marta Gil (admin)", "admin", "Badajoz");
 
   console.log("→ sectores…");
   const sectoresNom = ["Hostelería", "Construcción", "Agricultura", "Comercio", "Transporte", "Salud"];
@@ -90,15 +92,54 @@ async function main() {
     ["Comercial Badajoz SL", "Comercio", ana], ["Transportes Mérida SL", "Transporte", carlos],
     ["Clínica Dental Cáceres SL", "Salud", lucia], ["Ferretería Centro SL", "Comercio", resp],
   ];
+  // La oficina del cliente sigue a la de su asesor (así cada asesor ve su cartera).
+  const oficinaDe = { [ana]: "Badajoz", [carlos]: "Don Benito", [lucia]: "Castuera", [resp]: "Badajoz" };
   const clientes = [];
   for (const [razon, sector, asesor] of cliDefs) {
     const cif = genCif();
+    const slug = razon.split(" ")[0].toLowerCase();
     const { data } = await a.from("clientes").insert({
-      cif, razon_social: razon, asesor_id: asesor, direccion: "Extremadura", email: `info@${razon.split(" ")[0].toLowerCase()}.es`,
-      condiciones_pago: "30 días", iban: "ES9121000418450200051332",
+      cif, razon_social: razon, asesor_id: asesor, direccion: "Extremadura",
+      email: `info@${slug}.es`,
+      oficina: oficinaDe[asesor],
+      carpeta_url: `smb://servidor-laramarcos/clientes/${slug}`,
     }).select("id").single();
     await a.from("cliente_sectores").insert({ cliente_id: data.id, sector_id: sectores[sector] });
+
+    // Cuentas bancarias: algunos clientes tienen varias.
+    const cuentas = [{ cliente_id: data.id, iban: "ES9121000418450200051332", descripcion: "Cuenta principal" }];
+    if (["Bar La Plaza SL", "Transportes Mérida SL"].includes(razon)) {
+      cuentas.push({ cliente_id: data.id, iban: "ES7100302053091234567895", descripcion: "Cuenta de nóminas" });
+    }
+    await a.from("cliente_cuentas").insert(cuentas);
+
     clientes.push({ id: data.id, razon, asesor, sector });
+  }
+
+  console.log("→ servicios contratados + evolución de cuota…");
+  // [cliente, servicio, meses desde el alta, cuota inicial, subida (importe, meses atrás)]
+  const contratos = [
+    [clientes[0], "Contabilidad mensual", 24, 150, [180, 12]],
+    [clientes[0], "Declaración trimestral de IVA", 24, 80, null],
+    [clientes[1], "Nóminas mensuales", 18, 190, [210, 6]],
+    [clientes[2], "Contabilidad mensual", 36, 200, [240, 14]],
+    [clientes[3], "Declaración trimestral de IVA", 12, 90, null],
+    [clientes[4], "Contabilidad mensual", 30, 170, [185, 8]],
+    [clientes[6], "Nóminas mensuales", 9, 200, null],
+    [clientes[7], "Contabilidad mensual", 15, 180, [195, 3]],
+    [clientes[8], "Declaración de la Renta", 6, 120, null],
+  ];
+  const mesesAtras = (m) => { const x = new Date(); x.setMonth(x.getMonth() - m); return x.toISOString().slice(0, 10); };
+  for (const [cli, servicio, mesesAlta, cuotaIni, subida] of contratos) {
+    const fecha_inicio = mesesAtras(mesesAlta);
+    const { data: cs } = await a.from("cliente_servicios")
+      .insert({ cliente_id: cli.id, servicio_id: servicios[servicio], fecha_inicio })
+      .select("id").single();
+    const cuotas = [{ cliente_servicio_id: cs.id, importe: cuotaIni, fecha_efecto: fecha_inicio, nota: "Cuota inicial" }];
+    if (subida) {
+      cuotas.push({ cliente_servicio_id: cs.id, importe: subida[0], fecha_efecto: mesesAtras(subida[1]), nota: "Revisión anual de tarifas" });
+    }
+    await a.from("cliente_servicio_cuotas").insert(cuotas);
   }
 
   console.log("→ tareas + subtareas…");

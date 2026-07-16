@@ -8,6 +8,7 @@ export const ROL_LABEL: Record<Rol, string> = {
   admin: "Administrador",
 };
 
+/** Sedes del despacho. Un asesor solo ve la cartera de su oficina. */
 export const OFICINAS = ["Badajoz", "Castuera", "Don Benito"] as const;
 export type Oficina = (typeof OFICINAS)[number];
 
@@ -47,18 +48,47 @@ export interface Cliente {
   codigo_postal: string | null;
   email: string | null;
   telefono: string | null;
-  iban: string | null;
-  condiciones_pago: string | null;
   tarifas: Record<string, unknown>;
   asesor_id: string | null;
+  oficina: Oficina | null;
+  carpeta_url: string | null;   // carpeta del cliente en el servidor del despacho
+  fecha_baja: string | null;    // fecha en que dejó el servicio (null = activo)
   activo: boolean;
   created_at: string;
+}
+
+/** Cuenta bancaria del cliente. Un cliente puede tener varias. */
+export interface CuentaCliente {
+  id: string;
+  iban: string;
+  descripcion: string | null; // nombre corto para reconocerla
+}
+
+/** Un cambio de precio de la cuota, con la fecha desde la que aplica. */
+export interface CuotaServicio {
+  id: string;
+  importe: number;
+  fecha_efecto: string;
+  nota: string | null;
+}
+
+/** Servicio contratado por el cliente, con su cuota actual y su evolución. */
+export interface ServicioContratado {
+  id: string;
+  servicio_id: string;
+  servicio_nombre: string;
+  fecha_inicio: string;
+  fecha_fin: string | null;
+  cuotaActual: number | null;      // importe vigente hoy
+  cuotas: CuotaServicio[];         // histórico, de más reciente a más antigua
 }
 
 /** Cliente con sus sectores y el nombre del asesor (vista de listado/ficha). */
 export interface ClienteConRelaciones extends Cliente {
   sectores: Sector[];
   asesor_nombre: string | null;
+  cuentas: CuentaCliente[];
+  servicios: ServicioContratado[];
 }
 
 export interface Servicio {
@@ -180,6 +210,12 @@ export interface Proveedor {
   created_at: string;
 }
 
+/** Una cuenta tal y como llega del formulario (aún sin id si es nueva). */
+export interface CuentaInput {
+  iban: string;
+  descripcion?: string;
+}
+
 /** Datos del formulario de alta/edición. */
 export interface ClienteInput {
   cif: string;
@@ -189,8 +225,10 @@ export interface ClienteInput {
   codigo_postal?: string;
   email?: string;
   telefono?: string;
-  iban?: string;
-  condiciones_pago?: string;
   asesor_id?: string | null;
+  oficina?: Oficina | null;
+  carpeta_url?: string;
+  fecha_baja?: string;
+  cuentas: CuentaInput[];
   sector_ids: string[];
 }

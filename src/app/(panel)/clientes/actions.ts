@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { validateCliente, hasErrors, type FieldErrors } from "@/lib/validators/cliente";
-import type { ClienteInput, Sector } from "@/lib/types";
+import type { ClienteInput, Oficina, Sector } from "@/lib/types";
 
 export type CrearSectorResult =
   | { ok: true; sector: Sector }
@@ -62,6 +62,13 @@ export interface ClienteFormState {
 }
 
 function parseForm(formData: FormData): ClienteInput {
+  // Las cuentas llegan como dos arrays paralelos (iban[i] ↔ descripción[i]).
+  const ibans = formData.getAll("cuenta_iban").map(String);
+  const descripciones = formData.getAll("cuenta_descripcion").map(String);
+  const cuentas = ibans
+    .map((iban, i) => ({ iban: iban.trim(), descripcion: (descripciones[i] ?? "").trim() || undefined }))
+    .filter((c) => c.iban); // se descartan las filas vacías
+
   return {
     cif: String(formData.get("cif") ?? "").trim(),
     razon_social: String(formData.get("razon_social") ?? "").trim(),
@@ -70,9 +77,11 @@ function parseForm(formData: FormData): ClienteInput {
     codigo_postal: String(formData.get("codigo_postal") ?? "").trim() || undefined,
     email: String(formData.get("email") ?? "").trim() || undefined,
     telefono: String(formData.get("telefono") ?? "").trim() || undefined,
-    iban: String(formData.get("iban") ?? "").trim() || undefined,
-    condiciones_pago: String(formData.get("condiciones_pago") ?? "").trim() || undefined,
     asesor_id: (String(formData.get("asesor_id") ?? "").trim() || null) as string | null,
+    oficina: (String(formData.get("oficina") ?? "").trim() || null) as Oficina | null,
+    carpeta_url: String(formData.get("carpeta_url") ?? "").trim() || undefined,
+    fecha_baja: String(formData.get("fecha_baja") ?? "").trim() || undefined,
+    cuentas,
     sector_ids: formData.getAll("sector_ids").map(String).filter(Boolean),
   };
 }
@@ -93,6 +102,9 @@ async function persist(
   // Si no se asigna asesor explícitamente, el creador es el asesor por defecto.
   const asesorId = input.asesor_id ?? user.id;
 
+  // Al fijar la fecha de finalización el cliente deja de estar activo.
+  const fechaBaja = input.fecha_baja ?? null;
+
   const fields = {
     cif: input.cif.toUpperCase(),
     razon_social: input.razon_social,
@@ -101,9 +113,11 @@ async function persist(
     codigo_postal: input.codigo_postal ?? null,
     email: input.email ?? null,
     telefono: input.telefono ?? null,
-    iban: input.iban ? input.iban.toUpperCase().replace(/\s/g, "") : null,
-    condiciones_pago: input.condiciones_pago ?? null,
     asesor_id: asesorId,
+    oficina: input.oficina ?? null,
+    carpeta_url: input.carpeta_url ?? null,
+    fecha_baja: fechaBaja,
+    activo: !fechaBaja,
   };
 
   let clienteId = id;
@@ -128,7 +142,20 @@ async function persist(
     );
   }
 
+  // Sincronizar cuentas bancarias (se reemplaza el juego completo)
+  await supabase.from("cliente_cuentas").delete().eq("cliente_id", clienteId);
+  if (input.cuentas.length) {
+    await supabase.from("cliente_cuentas").insert(
+      input.cuentas.map((c) => ({
+        cliente_id: clienteId,
+        iban: c.iban.toUpperCase().replace(/\s/g, ""),
+        descripcion: c.descripcion ?? null,
+      })),
+    );
+  }
+
   revalidatePath("/clientes");
+  revalidatePath(`/clientes/${clienteId}`);
   return { ok: true, errors: {} };
 }
 
@@ -157,4 +184,67 @@ export async function updateClienteAction(
   const result = await persist(parseForm(formData), id);
   if (result.ok) redirect("/clientes");
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Servicios contratados y evolución de la cuota (ficha de cliente)
+// ---------------------------------------------------------------------------
+
+/** Contrata un servicio para el cliente, con su fecha de inicio y cuota inicial. */
+export async function contratarServicioAction(clienteId: string, formData: FormData) {
+  const servicio_id = String(formData.get("servicio_id") ?? "").trim();
+  if (!servicio_id) return;
+  const fecha_inicio = String(formData.get("fecha_inicio") ?? "").trim() || new Date().toISOString().slice(0, 10);
+  const importe = Number(String(formData.get("importe") ?? "").replace(",", "."));
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("cliente_servicios")
+    .insert({ cliente_id: clienteId, servicio_id, fecha_inicio })
+    .select("id")
+    .single();
+  if (error || !data) return;
+
+  // La cuota inicial arranca el mismo día que el servicio.
+  if (Number.isFinite(importe) && importe >= 0) {
+    await supabase.from("cliente_servicio_cuotas").insert({
+      cliente_servicio_id: data.id,
+      importe,
+      fecha_efecto: fecha_inicio,
+      nota: "Cuota inicial",
+    });
+  }
+  revalidatePath(`/clientes/${clienteId}`);
+}
+
+/** Registra un cambio de cuota: no pisa el precio anterior, lo encadena. */
+export async function cambiarCuotaAction(clienteId: string, clienteServicioId: string, formData: FormData) {
+  const importe = Number(String(formData.get("importe") ?? "").replace(",", "."));
+  if (!Number.isFinite(importe) || importe < 0) return;
+  const fecha_efecto = String(formData.get("fecha_efecto") ?? "").trim() || new Date().toISOString().slice(0, 10);
+  const nota = String(formData.get("nota") ?? "").trim() || null;
+
+  const supabase = await createClient();
+  await supabase.from("cliente_servicio_cuotas").insert({
+    cliente_servicio_id: clienteServicioId,
+    importe,
+    fecha_efecto,
+    nota,
+  });
+  revalidatePath(`/clientes/${clienteId}`);
+}
+
+/** Marca la fecha de fin de un servicio contratado (el cliente lo deja). */
+export async function finalizarServicioAction(clienteId: string, clienteServicioId: string, formData: FormData) {
+  const fecha_fin = String(formData.get("fecha_fin") ?? "").trim() || new Date().toISOString().slice(0, 10);
+  const supabase = await createClient();
+  await supabase.from("cliente_servicios").update({ fecha_fin }).eq("id", clienteServicioId);
+  revalidatePath(`/clientes/${clienteId}`);
+}
+
+/** Elimina un servicio contratado y todo su histórico de cuotas. */
+export async function eliminarServicioContratadoAction(clienteId: string, clienteServicioId: string) {
+  const supabase = await createClient();
+  await supabase.from("cliente_servicios").delete().eq("id", clienteServicioId);
+  revalidatePath(`/clientes/${clienteId}`);
 }
