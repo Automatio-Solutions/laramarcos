@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/PrintButton";
-import { calcularTotal, type LineaPresupuesto } from "@/lib/presupuesto/core";
+import { calcularTotal, IVA_TIPO_DEFECTO, type LineaPresupuesto } from "@/lib/presupuesto/core";
 
 const eur = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" });
 
@@ -19,7 +19,7 @@ export default async function ImprimirPresupuestoPage({ params }: { params: Prom
 
   const lineas = (data.lineas as LineaPresupuesto[]) ?? [];
   const cli = data.cliente as unknown as { razon_social: string; cif: string; direccion: string | null } | null;
-  const { subtotal, total } = calcularTotal(lineas, Number(data.descuento_global ?? 0));
+  const { subtotal, base_imponible, iva_cuota, total } = calcularTotal(lineas, Number(data.descuento_global ?? 0));
 
   return (
     <main className="mx-auto max-w-3xl bg-white p-10 text-[#1f223e]">
@@ -73,11 +73,13 @@ export default async function ImprimirPresupuestoPage({ params }: { params: Prom
         </tbody>
       </table>
 
-      <div className="mt-4 ml-auto w-64 space-y-1 text-sm">
+      <div className="mt-4 ml-auto w-72 space-y-1 text-sm">
         <div className="flex justify-between text-neutral-500"><span>Subtotal</span><span>{eur.format(subtotal)}</span></div>
         {Number(data.descuento_global) > 0 && (
-          <div className="flex justify-between text-neutral-500"><span>Descuento global</span><span>{data.descuento_global}%</span></div>
+          <div className="flex justify-between text-neutral-500"><span>Descuento global</span><span>−{data.descuento_global}%</span></div>
         )}
+        <div className="flex justify-between text-neutral-500"><span>Base imponible</span><span>{eur.format(base_imponible)}</span></div>
+        <div className="flex justify-between text-neutral-500"><span>IVA {IVA_TIPO_DEFECTO}%</span><span>{eur.format(iva_cuota)}</span></div>
         <div className="flex justify-between border-t border-[#1f223e] pt-1 text-lg font-bold text-[#1f223e]"><span>Total</span><span>{eur.format(total)}</span></div>
       </div>
 

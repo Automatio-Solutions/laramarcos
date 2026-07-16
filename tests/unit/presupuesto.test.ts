@@ -25,7 +25,31 @@ test("generarDesdeTexto: ignora acentos y avisa si no hay match (AC-03)", () => 
   assert.ok(r2.aviso && r2.aviso.length > 0);
 });
 
-test("calcularTotal: descuentos por línea y global", () => {
-  assert.deepEqual(calcularTotal([{ concepto: "x", cantidad: 2, precio: 100, descuento: 10 }], 0), { subtotal: 180, total: 180 });
-  assert.deepEqual(calcularTotal([{ concepto: "x", cantidad: 1, precio: 100, descuento: 0 }], 10), { subtotal: 100, total: 90 });
+test("calcularTotal: descuentos por línea y global, con IVA desglosado", () => {
+  // Los precios del catálogo son base imponible; el IVA (21%) se añade encima.
+  assert.deepEqual(calcularTotal([{ concepto: "x", cantidad: 2, precio: 100, descuento: 10 }], 0), {
+    subtotal: 180, base_imponible: 180, iva_cuota: 37.8, total: 217.8,
+  });
+  assert.deepEqual(calcularTotal([{ concepto: "x", cantidad: 1, precio: 100, descuento: 0 }], 10), {
+    subtotal: 100, base_imponible: 90, iva_cuota: 18.9, total: 108.9,
+  });
+});
+
+test("calcularTotal: base + cuota cuadra exactamente con el total (sin céntimo perdido)", () => {
+  // Caso real del tarifario: FSCL-003 (45 €) → 54,45 € con IVA.
+  const t = calcularTotal([{ concepto: "Certificado digital", cantidad: 1, precio: 45, descuento: 0 }], 0);
+  assert.equal(t.total, 54.45);
+  assert.equal(t.base_imponible + t.iva_cuota, t.total);
+});
+
+test("calcularTotal: tarifa horaria (FSCL-007, 55 €/hora x 3 horas)", () => {
+  const t = calcularTotal([{ concepto: "Representación ante inspección AEAT", cantidad: 3, precio: 55, descuento: 0 }], 0);
+  assert.equal(t.base_imponible, 165);
+  assert.equal(t.iva_cuota, 34.65);
+  assert.equal(t.total, 199.65);
+});
+
+test("calcularTotal: IVA configurable (por si algún servicio no va al 21%)", () => {
+  const t = calcularTotal([{ concepto: "x", cantidad: 1, precio: 100, descuento: 0 }], 0, 10);
+  assert.deepEqual(t, { subtotal: 100, base_imponible: 100, iva_cuota: 10, total: 110 });
 });

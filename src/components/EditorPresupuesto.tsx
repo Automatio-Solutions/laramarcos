@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { calcularTotal, type LineaPresupuesto } from "@/lib/presupuesto/core";
+import { calcularTotal, IVA_TIPO_DEFECTO, type LineaPresupuesto } from "@/lib/presupuesto/core";
 
 const eur = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" });
 
@@ -30,7 +30,7 @@ export function EditorPresupuesto({
   const upd = (i: number, k: keyof LineaPresupuesto, v: string) =>
     setLineas((p) => p.map((l, idx) => (idx === i ? { ...l, [k]: k === "concepto" ? v : Number(v) } : l)));
 
-  const { subtotal, total } = calcularTotal(lineas, descGlobal);
+  const { subtotal, base_imponible, iva_cuota, total } = calcularTotal(lineas, descGlobal);
 
   return (
     <form action={action.bind(null, id)} className="space-y-4">
@@ -82,8 +82,12 @@ export function EditorPresupuesto({
             <input name="validez_dias" type="number" defaultValue={validezInicial} disabled={bloqueado} className="w-28 rounded-md border border-border bg-surface px-2 py-1.5 text-right text-fg disabled:opacity-60" />
           </label>
         </div>
-        <div className="text-right">
-          <p className="text-sm text-fg-muted">Subtotal: {eur.format(subtotal)}</p>
+        <div className="space-y-0.5 text-right text-sm">
+          <p className="text-fg-muted">Subtotal: {eur.format(subtotal)}</p>
+          {descGlobal > 0 && (
+            <p className="text-fg-muted">Base imponible (−{descGlobal}%): {eur.format(base_imponible)}</p>
+          )}
+          <p className="text-fg-muted">IVA {IVA_TIPO_DEFECTO}%: {eur.format(iva_cuota)}</p>
           <p className="text-xl font-bold text-primary">Total: {eur.format(total)}</p>
         </div>
       </div>

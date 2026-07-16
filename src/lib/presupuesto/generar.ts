@@ -18,10 +18,26 @@ export async function generarPresupuesto(
     const { default: Anthropic } = await import("@anthropic-ai/sdk");
     const client = new Anthropic({ apiKey: key });
 
-    const catalogoMin = catalogo.map((s) => ({ id: s.id, nombre: s.nombre, precio_base: s.precio_base }));
+    const catalogoMin = catalogo.map((s) => ({
+      codigo: s.codigo ?? null,
+      nombre: s.nombre,
+      precio_base: Number(s.precio_base),
+      unidad: s.unidad ?? "fijo",
+    }));
     const msg = await client.messages.create({
       model: MODELO_CLAUDE,
       max_tokens: 8192,
+      system:
+        "Eres asesor de una gestoría en Extremadura y preparas presupuestos con el tarifario del despacho.\n" +
+        "Reglas que no puedes saltarte:\n" +
+        "· Solo puedes usar servicios del catálogo que te dan. Nunca inventes servicios ni precios.\n" +
+        "· Los precios del catálogo son BASE IMPONIBLE (sin IVA). El IVA lo añade el sistema después: no lo metas tú.\n" +
+        "· unidad='fijo' → precio cerrado, cantidad = número de gestiones.\n" +
+        "· unidad='hora' → es una TARIFA HORARIA. La cantidad son horas estimadas. Si no puedes estimarlas con " +
+        "fundamento, pon cantidad 1 y dilo en el aviso para que el asesor ajuste las horas.\n" +
+        "· unidad='unidad' → la cantidad es el número de unidades (p. ej. documentos impresos).\n" +
+        "· Si el cliente describe algo que el tarifario no cubre, NO lo fuerces contra un servicio parecido: " +
+        "déjalo fuera y avísalo.",
       tools: [
         {
           name: "proponer_lineas",
@@ -34,15 +50,19 @@ export async function generarPresupuesto(
                 items: {
                   type: "object",
                   properties: {
-                    concepto: { type: "string" },
-                    cantidad: { type: "number" },
-                    precio: { type: "number" },
-                    descuento: { type: "number" },
+                    codigo: { type: ["string", "null"], description: "Código del servicio del catálogo (p. ej. FSCL-001)." },
+                    concepto: { type: "string", description: "Nombre del servicio tal cual aparece en el catálogo." },
+                    cantidad: { type: "number", description: "Gestiones, horas o unidades según la 'unidad' del servicio." },
+                    precio: { type: "number", description: "precio_base del catálogo, sin IVA. No lo cambies." },
+                    descuento: { type: "number", description: "% de descuento en la línea. 0 salvo que el asesor lo pida." },
                   },
                   required: ["concepto", "cantidad", "precio", "descuento"],
                 },
               },
-              aviso: { type: ["string", "null"], description: "Mensaje si la descripción es ambigua o no hay servicio claro." },
+              aviso: {
+                type: ["string", "null"],
+                description: "Qué debe revisar el asesor: horas estimadas a ojo, peticiones que el tarifario no cubre, ambigüedades. null si no hay nada que señalar.",
+              },
             },
             required: ["lineas", "aviso"],
           },
@@ -52,7 +72,10 @@ export async function generarPresupuesto(
       messages: [
         {
           role: "user",
-          content: `Catálogo de servicios (id, nombre, precio_base):\n${JSON.stringify(catalogoMin)}\n\nDescripción del trabajo:\n"${texto}"\n\nIdentifica qué servicios del catálogo aplican y a qué precio. Si la descripción es ambigua o no encaja ningún servicio, deja lineas vacío y rellena 'aviso'. No inventes precios.`,
+          content:
+            `Tarifario del despacho (codigo, nombre, precio_base sin IVA, unidad):\n${JSON.stringify(catalogoMin)}\n\n` +
+            `Lo que necesita el cliente:\n"${texto}"\n\n` +
+            `Monta el presupuesto con los servicios del tarifario que apliquen. Si no encaja ninguno, deja lineas vacío y explica por qué en 'aviso'.`,
         },
       ],
     });

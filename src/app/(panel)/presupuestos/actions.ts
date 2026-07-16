@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { generarPresupuesto } from "@/lib/presupuesto/generar";
-import { calcularTotal, type LineaPresupuesto } from "@/lib/presupuesto/core";
+import { calcularTotal, type LineaPresupuesto, type ServicioCatalogo } from "@/lib/presupuesto/core";
 import { aceptarPresupuesto } from "@/lib/presupuesto/aceptar";
 
 export interface GenState {
@@ -20,14 +20,23 @@ export async function generarPresupuestoAction(_p: GenState, formData: FormData)
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  const { data: servicios } = await supabase.from("servicios").select("id, nombre, precio_base").eq("activo", true);
+  // El código y la unidad son necesarios para que la IA distinga las tarifas
+  // horarias de los precios cerrados (tarifario real del despacho).
+  const { data: servicios } = await supabase
+    .from("servicios")
+    .select("id, nombre, precio_base, codigo, unidad")
+    .eq("activo", true);
 
-  const gen = await generarPresupuesto(texto, (servicios ?? []) as { id: string; nombre: string; precio_base: number }[]);
-  const { total } = calcularTotal(gen.lineas, 0);
+  const gen = await generarPresupuesto(texto, (servicios ?? []) as ServicioCatalogo[]);
+  const { base_imponible, iva_cuota, total } = calcularTotal(gen.lineas, 0);
 
   const { data: pre } = await supabase
     .from("presupuestos")
-    .insert({ cliente_id, servicio_id, lineas: gen.lineas, total, creado_por: user?.id, estado: "borrador" })
+    .insert({
+      cliente_id, servicio_id, lineas: gen.lineas,
+      base_imponible, iva_cuota, total,
+      creado_por: user?.id, estado: "borrador",
+    })
     .select("id")
     .single();
 
@@ -51,7 +60,7 @@ export async function guardarPresupuestoAction(id: string, formData: FormData) {
     .filter((l) => l.concepto);
 
   const descuento_global = Number(formData.get("descuento_global") ?? 0) || 0;
-  const { total } = calcularTotal(lineas, descuento_global);
+  const { base_imponible, iva_cuota, total } = calcularTotal(lineas, descuento_global);
 
   const supabase = await createClient();
   await supabase
@@ -59,6 +68,8 @@ export async function guardarPresupuestoAction(id: string, formData: FormData) {
     .update({
       lineas,
       descuento_global,
+      base_imponible,
+      iva_cuota,
       total,
       condiciones: String(formData.get("condiciones") ?? "").trim() || null,
       validez_dias: Number(formData.get("validez_dias") ?? 30) || 30,
