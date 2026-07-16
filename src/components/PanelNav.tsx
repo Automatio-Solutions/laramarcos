@@ -16,6 +16,7 @@ const NAV = [
   { href: "/precontabilizacion", label: "Precontabilización", icon: "🧮" },
   { href: "/plantillas-tareas", label: "Plantillas", icon: "📁" },
   { href: "/auditoria", label: "Auditoría", icon: "📋" },
+  { href: "/usuarios", label: "Usuarios", icon: "👤", staff: true },
 ];
 
 export function PanelNav({ esStaff = false }: { esStaff?: boolean }) {

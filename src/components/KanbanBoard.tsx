@@ -26,6 +26,22 @@ export function KanbanBoard({ tareas: initial }: { tareas: TareaConRelaciones[] 
     await updateEstadoTareaAction(id, estado);
   }
 
+  /** Botón de flujo de la tarjeta: avanza al siguiente paso sin arrastrar. */
+  async function avanzar(t: TareaConRelaciones) {
+    if (t.estado === "pendiente") {
+      await aplicarEstado(t.id, "en_curso");
+    } else if (t.estado === "en_curso") {
+      // Misma regla que al arrastrar: si quedan subtareas, pedir confirmación
+      if (t.subtareas_pendientes > 0) {
+        setPendiente({ tipo: "completar", id: t.id, titulo: t.titulo, n: t.subtareas_pendientes });
+      } else {
+        await aplicarEstado(t.id, "completada");
+      }
+    } else if (t.estado === "completada") {
+      setPendiente({ tipo: "archivar", id: t.id, titulo: t.titulo });
+    }
+  }
+
   async function onDrop(estado: EstadoTarea) {
     if (!dragId) return;
     const id = dragId;
@@ -94,15 +110,18 @@ export function KanbanBoard({ tareas: initial }: { tareas: TareaConRelaciones[] 
                     <div className="flex items-start justify-between gap-2">
                       <p className="flex-1 text-sm font-medium text-fg">{t.titulo}</p>
                       <div className="flex shrink-0 gap-1">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setPendiente({ tipo: "archivar", id: t.id, titulo: t.titulo }); }}
-                          className="rounded p-1 text-fg-muted hover:bg-surface-raised hover:text-fg"
-                          title="Archivar"
-                        >
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 8h16M5 8l.8 10a1 1 0 001 .9h10.4a1 1 0 001-.9L20 8M4 8l1-3a1 1 0 011-.7h12a1 1 0 011 .7l1 3M10 12h4" />
-                          </svg>
-                        </button>
+                        {/* En "Completada" el botón de flujo ya archiva; no duplicamos el icono */}
+                        {t.estado !== "completada" && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setPendiente({ tipo: "archivar", id: t.id, titulo: t.titulo }); }}
+                            className="rounded p-1 text-fg-muted hover:bg-surface-raised hover:text-fg"
+                            title="Archivar"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4 8h16M5 8l.8 10a1 1 0 001 .9h10.4a1 1 0 001-.9L20 8M4 8l1-3a1 1 0 011-.7h12a1 1 0 011 .7l1 3M10 12h4" />
+                            </svg>
+                          </button>
+                        )}
                         <button
                           onClick={(e) => { e.stopPropagation(); setPendiente({ tipo: "eliminar", id: t.id, titulo: t.titulo }); }}
                           className="rounded p-1 text-error hover:bg-error/10"
@@ -127,6 +146,19 @@ export function KanbanBoard({ tareas: initial }: { tareas: TareaConRelaciones[] 
                     {t.responsable_nombre && (
                       <p className="mt-1 text-xs text-fg-muted">👤 {t.responsable_nombre}</p>
                     )}
+                    {/* Botón de flujo: evita tener que arrastrar la tarjeta */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); avanzar(t); }}
+                      className={`mt-2.5 w-full rounded-md px-3 py-1.5 text-xs font-medium text-white transition ${
+                        t.estado === "pendiente" ? "bg-primary hover:bg-[var(--color-primary-hover)]"
+                          : t.estado === "en_curso" ? "bg-success hover:opacity-90"
+                            : "bg-secondary hover:opacity-90"
+                      }`}
+                    >
+                      {t.estado === "pendiente" ? "Empezar tarea"
+                        : t.estado === "en_curso" ? "Completar tarea"
+                          : "Archivar"}
+                    </button>
                   </article>
                 ))}
                 {items.length === 0 && <p className="px-1 py-4 text-center text-xs text-fg-muted">—</p>}

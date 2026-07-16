@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 
 export interface CargaEmpleado {
+  id: string | null; // null = "Sin asignar" (no enlaza a un responsable concreto)
   nombre: string;
   abiertas: number;
   vencidas: number;
@@ -20,6 +21,7 @@ interface Row {
   vencimiento: string | null;
   created_at: string;
   completada_at: string | null;
+  responsable_id: string | null;
   responsable: { nombre: string } | null;
 }
 
@@ -28,7 +30,7 @@ export async function getDashboard(desde: string, hasta: string): Promise<Dashbo
   const supabase = await createClient();
   const { data } = await supabase
     .from("tareas")
-    .select("estado, vencimiento, created_at, completada_at, responsable:usuarios!tareas_responsable_id_fkey(nombre)")
+    .select("estado, vencimiento, created_at, completada_at, responsable_id, responsable:usuarios!tareas_responsable_id_fkey(nombre)")
     .eq("archivada", false)
     .gte("created_at", desde)
     .lte("created_at", `${hasta}T23:59:59`);
@@ -42,7 +44,7 @@ export async function getDashboard(desde: string, hasta: string): Promise<Dashbo
   for (const r of rows) {
     totalPeriodo++;
     const nombre = r.responsable?.nombre ?? "Sin asignar";
-    if (!carga.has(nombre)) carga.set(nombre, { nombre, abiertas: 0, vencidas: 0 });
+    if (!carga.has(nombre)) carga.set(nombre, { id: r.responsable_id, nombre, abiertas: 0, vencidas: 0 });
     const c = carga.get(nombre)!;
 
     if (r.estado !== "completada") {
