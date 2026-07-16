@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CargaRow } from "@/components/CargaRow";
 import { getDashboard } from "@/lib/repos/dashboard";
 
 function Kpi({ label, value, tone }: { label: string; value: string; tone?: string }) {
@@ -77,7 +78,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       </div>
 
       <section className="space-y-3">
-        <h2 className="font-semibold text-fg">Carga por empleado</h2>
+        <div className="flex items-baseline gap-3">
+          <h2 className="font-semibold text-fg">Carga por empleado</h2>
+          <span className="text-xs text-fg-muted">Pincha en un empleado para ver sus tareas</span>
+        </div>
         <div className="overflow-hidden rounded-lg border border-border bg-surface">
           <table className="w-full text-sm">
             <thead className="bg-surface-raised text-left text-fg-muted">
@@ -90,11 +94,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             <tbody>
               {m.carga.length === 0 && <tr><td colSpan={3} className="px-4 py-8 text-center text-fg-muted">Sin datos en este periodo.</td></tr>}
               {m.carga.map((c) => (
-                <tr key={c.nombre} className="border-t border-border">
-                  <td className="px-4 py-2.5 text-fg">{c.nombre}</td>
-                  <td className="px-4 py-2.5 text-right text-fg">{c.abiertas}</td>
-                  <td className={`px-4 py-2.5 text-right ${c.vencidas ? "text-error" : "text-fg-muted"}`}>{c.vencidas}</td>
-                </tr>
+                <CargaRow key={c.nombre} carga={c} />
               ))}
             </tbody>
           </table>
