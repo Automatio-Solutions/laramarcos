@@ -20,7 +20,7 @@ test("filaAplifisa: orden de columnas + total/cuota inferidos", () => {
   const fila = filaAplifisa({
     fecha: "2026-03-01", proveedor_nombre: "Endesa", proveedor_cif: "A28023430",
     concepto: "Suministro", base_imponible: 1000, iva_tipo: 21, iva_cuota: null,
-    total: null, subcuenta: "628",
+    total: null, subcuenta: "628", subcuenta_motivo: null, subcuenta_origen: null,
   });
   assert.equal(fila.length, COLUMNAS_APLIFISA.length);
   assert.equal(fila[0], "2026-03-01");

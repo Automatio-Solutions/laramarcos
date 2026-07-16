@@ -39,6 +39,8 @@ export async function subirFacturaAction(formData: FormData) {
     iva_cuota: r.iva_cuota,
     total: r.total,
     subcuenta: r.subcuenta,
+    subcuenta_motivo: r.subcuenta_motivo,
+    subcuenta_origen: r.subcuenta_origen,
     confianza: r.confianza,
     archivo_path: path,
     archivo_nombre: archivo.name,
@@ -68,6 +70,9 @@ export async function corregirFacturaAction(id: string, formData: FormData) {
     iva_cuota: num("iva_cuota"),
     total: num("total"),
     subcuenta,
+    // La corrección del asesor sustituye a la sugerencia de la IA.
+    subcuenta_origen: subcuenta ? "manual" : null,
+    subcuenta_motivo: subcuenta ? "Corregida manualmente por el asesor." : null,
     confianza: 100,
     revisada: true,
   }).eq("id", id);
