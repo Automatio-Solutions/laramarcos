@@ -21,8 +21,15 @@ export function validateCliente(input: Partial<ClienteInput>): FieldErrors {
     errors.email = "Email inválido.";
   }
 
-  if (input.iban && !isValidIban(input.iban)) {
-    errors.iban = "IBAN inválido (no supera la validación módulo 97).";
+  // Cada cuenta debe traer un IBAN válido. Se señala la primera que falle.
+  const cuentas = input.cuentas ?? [];
+  for (let i = 0; i < cuentas.length; i++) {
+    const iban = cuentas[i].iban?.trim();
+    if (!iban) continue; // las filas vacías se descartan al guardar
+    if (!isValidIban(iban)) {
+      errors.cuentas = `La cuenta ${i + 1} tiene un IBAN inválido (no supera la validación módulo 97).`;
+      break;
+    }
   }
 
   return errors;

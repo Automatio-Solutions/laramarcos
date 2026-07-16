@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ClienteForm } from "@/components/ClienteForm";
-import { getCliente, listSectores, listAsesores } from "@/lib/repos/clientes";
+import { ServiciosContratados } from "@/components/ServiciosContratados";
+import { getCliente, listSectores, listAsesores, listServiciosCatalogo, getMiOficina } from "@/lib/repos/clientes";
 import { getClienteHistorico } from "@/lib/repos/cliente-historico";
 import { ESTADO_LABEL } from "@/lib/estados";
 import { updateClienteAction } from "../actions";
@@ -14,11 +15,13 @@ export default async function EditarClientePage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [cliente, sectores, asesores, hist] = await Promise.all([
+  const [cliente, sectores, asesores, hist, catalogo, miOficina] = await Promise.all([
     getCliente(id),
     listSectores(),
     listAsesores(),
     getClienteHistorico(id),
+    listServiciosCatalogo(),
+    getMiOficina(),
   ]);
 
   if (!cliente) notFound();
@@ -31,10 +34,32 @@ export default async function EditarClientePage({
         <Link href="/clientes" className="text-sm text-fg-muted hover:underline">
           ← Clientes
         </Link>
-        <h1 className="mt-1 text-2xl font-bold text-primary">{cliente.razon_social}</h1>
+        <div className="mt-1 flex flex-wrap items-center gap-3">
+          <h1 className="text-2xl font-bold text-primary">{cliente.razon_social}</h1>
+          {cliente.oficina && (
+            <span className="rounded-md bg-primary-subtle px-2 py-0.5 text-xs font-medium text-primary">{cliente.oficina}</span>
+          )}
+          {cliente.fecha_baja && (
+            <span className="rounded-md bg-error/10 px-2 py-0.5 text-xs font-medium text-error">
+              Baja el {new Date(cliente.fecha_baja).toLocaleDateString("es-ES")}
+            </span>
+          )}
+        </div>
         <p className="font-mono text-xs text-fg-muted">{cliente.cif}</p>
+        {cliente.carpeta_url && (
+          <a
+            href={cliente.carpeta_url}
+            target="_blank"
+            rel="noopener"
+            className="mt-2 inline-block text-sm font-medium text-accent hover:underline"
+          >
+            📁 Abrir carpeta del cliente en el servidor
+          </a>
+        )}
       </header>
-      <ClienteForm action={action} sectores={sectores} asesores={asesores} cliente={cliente} />
+      <ClienteForm action={action} sectores={sectores} asesores={asesores} cliente={cliente} miOficina={miOficina} />
+
+      <ServiciosContratados clienteId={id} servicios={cliente.servicios} catalogo={catalogo} />
 
       {/* Ficha 360 — histórico del cliente (UC-112) */}
       <section className="space-y-4 border-t border-border pt-6">

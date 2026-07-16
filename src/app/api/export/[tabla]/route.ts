@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 
 // AC-18: exporta cualquier tabla permitida a CSV.
 const ALLOWED: Record<string, string> = {
-  clientes: "cif,razon_social,email,telefono,direccion,iban,condiciones_pago",
+  clientes: "cif,razon_social,email,telefono,direccion,ciudad,codigo_postal,oficina,fecha_baja",
   servicios: "nombre,categoria,precio_base,condiciones_default",
   proveedores: "cif,nombre,subcuenta_habitual,iva_default",
   sectores: "nombre",
