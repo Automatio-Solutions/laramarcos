@@ -1,4 +1,5 @@
 import "server-only";
+import { MODELO_CLAUDE } from "@/lib/ia/claude";
 import { generarDesdeTexto, type ServicioCatalogo, type ResultadoGeneracion } from "./core";
 
 // UC-201: genera las líneas del presupuesto a partir de texto libre + catálogo.
@@ -16,12 +17,11 @@ export async function generarPresupuesto(
   try {
     const { default: Anthropic } = await import("@anthropic-ai/sdk");
     const client = new Anthropic({ apiKey: key });
-    const model = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
 
     const catalogoMin = catalogo.map((s) => ({ id: s.id, nombre: s.nombre, precio_base: s.precio_base }));
     const msg = await client.messages.create({
-      model,
-      max_tokens: 1024,
+      model: MODELO_CLAUDE,
+      max_tokens: 8192,
       tools: [
         {
           name: "proponer_lineas",
@@ -63,8 +63,11 @@ export async function generarPresupuesto(
       return { lineas: out.lineas ?? [], aviso: out.aviso ?? null, motor: "claude" };
     }
     return { ...generarDesdeTexto(texto, catalogo), motor: "fallback" };
-  } catch {
-    // Cualquier fallo de la API → fallback determinista (no bloquea al usuario).
+  } catch (e) {
+    // Cualquier fallo de la API → fallback determinista (no bloquea al usuario),
+    // pero SÍ se registra: si no, un modelo mal configurado o una clave sin saldo
+    // degradarían a fallback en silencio y nadie se enteraría.
+    console.error("[M2] Claude falló al generar el presupuesto, se usa el fallback:", e);
     return { ...generarDesdeTexto(texto, catalogo), motor: "fallback" };
   }
 }
