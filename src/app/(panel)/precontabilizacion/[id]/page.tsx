@@ -8,8 +8,15 @@ interface Factura {
   id: string; fecha: string | null; proveedor_nombre: string | null; proveedor_cif: string | null;
   concepto: string | null; base_imponible: number | null; iva_tipo: number | null;
   iva_cuota: number | null; total: number | null; subcuenta: string | null;
+  subcuenta_motivo: string | null; subcuenta_origen: "historico" | "ia" | "manual" | null;
   confianza: number; archivo_nombre: string | null;
 }
+
+const ORIGEN_LABEL: Record<string, string> = {
+  historico: "📚 Histórico del proveedor",
+  ia: "🤖 Sugerida por la IA",
+  manual: "✍️ Corregida a mano",
+};
 
 export default async function RevisarFacturaPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -35,6 +42,17 @@ export default async function RevisarFacturaPage({ params }: { params: Promise<{
           <Field label="CIF proveedor" name="proveedor_cif" defaultValue={f.proveedor_cif} />
           <Field label="Subcuenta" name="subcuenta" defaultValue={f.subcuenta} placeholder="600 / 628 / 410…" />
         </div>
+        {/* AC-02: por qué esa subcuenta. El asesor decide con el motivo delante. */}
+        {f.subcuenta_motivo && (
+          <div className="rounded-lg border border-border bg-surface-raised p-3 text-sm">
+            <p className="font-medium text-fg">
+              {ORIGEN_LABEL[f.subcuenta_origen ?? ""] ?? "Subcuenta"}
+              {f.subcuenta ? ` · ${f.subcuenta}` : ""}
+            </p>
+            <p className="mt-1 text-fg-muted">{f.subcuenta_motivo}</p>
+          </div>
+        )}
+
         <Field label="Concepto" name="concepto" defaultValue={f.concepto} />
         <div className="grid gap-4 sm:grid-cols-4">
           <Field label="Base imponible" name="base_imponible" defaultValue={v(f.base_imponible)} />

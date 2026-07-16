@@ -9,6 +9,8 @@ export function semaforo(confianza: number): Semaforo {
   return "rojo";
 }
 
+export type OrigenSubcuenta = "historico" | "ia" | "manual";
+
 export interface FacturaDatos {
   fecha: string | null;
   proveedor_nombre: string | null;
@@ -19,6 +21,10 @@ export interface FacturaDatos {
   iva_cuota: number | null;
   total: number | null;
   subcuenta: string | null;
+  /** Por qué esa subcuenta (AC-02). Solo se rellena cuando la sugiere la IA. */
+  subcuenta_motivo: string | null;
+  /** De dónde salió: histórico del proveedor (UC-403), sugerencia IA o manual. */
+  subcuenta_origen: OrigenSubcuenta | null;
 }
 
 /** Columnas del Excel modelo (orden). Se ajusta al modelo real de Aplifisa cuando lo aporte el cliente. */
