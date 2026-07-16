@@ -34,8 +34,13 @@ async function wipe() {
   const tablas = ["notificaciones", "newsletters", "publicaciones", "ingesta_log", "facturas_ocr", "lineas_factura",
     "adjuntos", "presupuestos_recurrentes", "presupuestos", "comentarios", "tiempos", "dependencias_tarea",
     "subtareas", "tareas", "plantillas_subtareas", "cliente_servicio_cuotas", "cliente_servicios",
-    "cliente_cuentas", "cliente_sectores", "clientes", "servicios", "proveedores", "sectores"];
+    "cliente_cuentas", "cliente_sectores", "clientes", "proveedores", "sectores"];
   for (const t of tablas) await a.from(t).delete().neq("id", "00000000-0000-0000-0000-000000000000");
+
+  // OJO: `servicios` NO se vacía entera. El tarifario real del despacho (los que
+  // tienen código: FSCL-*, LBRL-*, RSTS-*) se carga con scripts/cargar-catalogo.mjs
+  // y sembrar la demo NO puede destruirlo. Solo se borran los servicios de demo.
+  await a.from("servicios").delete().is("codigo", null);
 }
 
 async function main() {
@@ -58,7 +63,11 @@ async function main() {
     sectores[n] = data.id;
   }
 
-  console.log("→ servicios + plantillas…");
+  // Servicios de demo (SIN código). El tarifario real del despacho vive aparte
+  // (scripts/cargar-catalogo.mjs) y ese script los desactiva al final para que la
+  // IA presupueste solo con tarifas reales. Estos existen porque la demo necesita
+  // cuotas mensuales (contabilidad, nóminas) que el tarifario real NO contempla.
+  console.log("→ servicios de demo + plantillas…");
   const servicios = {};
   const servDefs = [
     ["Constitución de SL", "Mercantil", 350], ["Declaración trimestral de IVA", "Fiscal", 90],

@@ -15,7 +15,7 @@ export default async function AceptacionPublicaPage({ params }: { params: Promis
 
   const { data } = await admin
     .from("presupuestos")
-    .select("estado, lineas, descuento_global, total, condiciones, validez_dias, cliente:clientes(razon_social)")
+    .select("estado, lineas, descuento_global, base_imponible, iva_tipo, iva_cuota, total, condiciones, validez_dias, cliente:clientes(razon_social)")
     .eq("token", token)
     .maybeSingle();
   if (!data) notFound();
@@ -48,7 +48,18 @@ export default async function AceptacionPublicaPage({ params }: { params: Promis
           </tbody>
         </table>
 
-        <p className="mt-4 text-right text-xl font-bold text-primary">Total: {eur.format(Number(data.total))}</p>
+        {/* El cliente debe ver el IVA desglosado, no solo el importe final. */}
+        <div className="mt-4 ml-auto w-64 space-y-1 text-sm">
+          <div className="flex justify-between text-fg-muted">
+            <span>Base imponible</span><span>{eur.format(Number(data.base_imponible))}</span>
+          </div>
+          <div className="flex justify-between text-fg-muted">
+            <span>IVA {Number(data.iva_tipo)}%</span><span>{eur.format(Number(data.iva_cuota))}</span>
+          </div>
+          <div className="flex justify-between border-t border-border pt-1 text-xl font-bold text-primary">
+            <span>Total</span><span>{eur.format(Number(data.total))}</span>
+          </div>
+        </div>
         {data.condiciones && <p className="mt-4 text-sm text-fg-muted">{data.condiciones}</p>}
         <p className="mt-1 text-xs text-fg-muted">Validez: {data.validez_dias} días.</p>
 
