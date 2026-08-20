@@ -9,7 +9,7 @@ export const ROL_LABEL: Record<Rol, string> = {
 };
 
 /** Sedes del despacho. Un asesor solo ve la cartera de su oficina. */
-export const OFICINAS = ["Badajoz", "Castuera", "Don Benito"] as const;
+export const OFICINAS = ["Badajoz", "Castuera", "Don Benito", "Orellana"] as const;
 export type Oficina = (typeof OFICINAS)[number];
 
 export interface Sector {
