@@ -373,12 +373,12 @@
         <tr>
           <td>M2</td>
           <td>Presupuestos con ayuda de IA y aceptación del cliente</td>
-          <td><span class="tag tag-warn">Falta el envío por email</span></td>
+          <td><span class="tag tag-warn">Correo ya construido</span></td>
         </tr>
         <tr>
           <td>M3</td>
           <td>Vigilancia diaria del DOE y el BOE</td>
-          <td><span class="tag tag-warn">Clasifica, aún no reparte</span></td>
+          <td><span class="tag tag-warn">Ya se descarga sola</span></td>
         </tr>
         <tr>
           <td>M4</td>
@@ -392,6 +392,16 @@
         </tr>
       </tbody>
     </table>
+  </div>
+
+  <div class="demo" style="margin-top:28px">
+    <p class="eyebrow">Avance desde la última versión</p>
+    <p>
+      El dominio de correo está verificado, <strong>crm.laramarcosasesores.es ya funciona</strong>,
+      la plataforma descarga el DOE y el BOE por su cuenta —sin depender de ninguna herramienta
+      externa— y <strong>los 594 clientes ya tienen sector asignado</strong>. Lo que queda son
+      decisiones del despacho, no programación. Están todas al final.
+    </p>
   </div>
 
   <!-- ============ M1 ============ -->
@@ -520,11 +530,10 @@
 
     <div class="aviso">
       <p>
-        <strong>Punto a tratar en la reunión.</strong> Hoy el envío del enlace se hace de forma
-        manual: la plataforma prepara el presupuesto y su enlace, pero el correo lo manda la
-        persona. Para que salga automáticamente, con seguimiento de aperturas y con el remitente
-        del propio despacho, hace falta contratar el servicio de correo y tocar el dominio.
-        Está detallado al final.
+        <strong>Punto a tratar en la reunión.</strong> El correo ya está montado: el dominio
+        del despacho está verificado y el envío construido. Falta una sola decisión, que es
+        suya: <strong>desde qué dirección quieren que salgan los presupuestos y a cuál quieren
+        que lleguen las respuestas de los clientes</strong>. Está al final, en el punto 3.
       </p>
     </div>
 
@@ -567,10 +576,17 @@
 
     <div class="aviso">
       <p>
-        <strong>Dos cosas dependen del despacho.</strong> El reparto de las circulares necesita
-        el servicio de correo, igual que los presupuestos. Y la segmentación por sector solo
-        será fina cuando cada cliente tenga su sector asignado: ese dato no venía en los
-        ficheros que se importaron, y hay que completarlo.
+        <strong>Ya hay sectores, y hay circulares que se pueden mandar mañana.</strong>
+        Toda la cartera está clasificada por forma jurídica: <strong>384 autónomos y 210
+        sociedades</strong>. Eso no es poca cosa, porque la normativa que más les afecta
+        —cotización del RETA, módulos, IRPF, impuesto de sociedades— depende precisamente de
+        eso y no de la actividad. Son las dos circulares con más lectores del despacho y están
+        listas: 275 autónomos y 146 sociedades tienen email.
+      </p>
+      <p style="margin-top:12px">
+        Lo que falta es el <strong>sector de actividad</strong>. Solo 46 clientes de 594 se
+        pueden deducir del nombre, porque el 65% de la cartera son autónomos que figuran con
+        su nombre y apellidos. Ese dato hay que pedirlo, y es el punto 2 del final.
       </p>
     </div>
   </section>
@@ -650,13 +666,81 @@
 
   <!-- ============ Cierre ============ -->
   <section class="cierre">
-    <h2>Lo que hace falta pedirles</h2>
+    <h2>Lo que hay que resolver en la reunión</h2>
     <p>
-      La aplicación está construida y probada. Lo que queda pendiente no es programación:
-      son servicios que tiene que contratar o aportar el despacho. Conviene salir de la
-      reunión con una respuesta a estos cuatro puntos.
+      La aplicación está construida y probada. Todo lo que queda son decisiones o datos
+      que solo puede dar el despacho. Van ordenados por lo que bloquean.
     </p>
 
+    <h3>1 · Los enlaces a las carpetas de los clientes</h3>
+    <p>
+      La ficha de cada cliente tiene ya un campo para la dirección de su carpeta en la nube:
+      se pega el enlace y aparece como acceso directo en su ficha, de modo que cualquier
+      asesor llega a la documentación del cliente sin salir de la plataforma.
+      <strong>Ahora mismo solo 3 clientes de 594 lo tienen puesto.</strong>
+    </p>
+    <p>
+      Como están cambiando el servidor de proveedor, la pregunta concreta es:
+      <strong>¿con quién hay que hablar para obtener la dirección de las carpetas una vez
+      hecha la mudanza?</strong> Conviene esperar a que el traslado termine antes de cargar
+      nada: si los enlaces cambian con el cambio de proveedor, se haría el trabajo dos veces.
+    </p>
+
+    <h3>2 · El sector de cada cliente</h3>
+    <p>
+      Toda la cartera está ya clasificada como autónomo o sociedad, de forma automática y sin
+      margen de error. Lo que falta es la actividad, y ese dato no está en ningún sitio del
+      que se pueda deducir: el 65% de los clientes figuran con su nombre y apellidos.
+    </p>
+    <p>
+      <strong>Llevas preparado un fichero por oficina</strong>, listo para abrir con Excel,
+      con la lista de sus clientes y una columna para escribir el sector:
+    </p>
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>Oficina</th><th>Clientes</th><th>Con email</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Badajoz</td><td>206</td><td>197</td></tr>
+          <tr><td>Don Benito</td><td>178</td><td>124</td></tr>
+          <tr><td>Castuera</td><td>113</td><td>33</td></tr>
+          <tr><td>Orellana</td><td>97</td><td>67</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:16px">
+      Cada fichero lleva también una columna para el enlace de la carpeta del punto anterior,
+      por si prefieren rellenar las dos cosas de una vez. Al devolverlos se cargan en la
+      plataforma sin trabajo manual.
+    </p>
+    <div class="demo">
+      <p class="eyebrow">El atajo que puede ahorrar toda esta tarea</p>
+      <p>
+        Si Aplifisa puede exportar el <strong>epígrafe de IAE</strong> de cada cliente, no hace
+        falta que nadie rellene nada: ese dato traduce a sector de forma automática y resuelve
+        los 594 de golpe, autónomos incluidos. Merece la pena preguntarlo antes de repartir
+        los ficheros.
+      </p>
+    </div>
+
+    <h3>3 · Las direcciones de correo</h3>
+    <p>
+      El correo está montado y el dominio verificado. Falta que decidan dos cosas, y son
+      independientes entre sí:
+    </p>
+    <dl class="pares">
+      <dt>Remitente</dt>
+      <dd>Desde qué dirección salen los presupuestos y desde cuál las circulares del DOE y el BOE. Pueden ser la misma o distintas.</dd>
+      <dt>Respuestas</dt>
+      <dd>A qué buzón llegan las contestaciones de los clientes. <strong>No tiene por qué ser la misma dirección</strong>, y no hace falta abrir un buzón nuevo: puede ser el correo que ya miran cada día.</dd>
+    </dl>
+    <p>
+      Es la última pieza que falta para que los presupuestos salgan solos. En cuanto lo
+      confirmen, se aplica en un rato.
+    </p>
+
+    <h3>4 · Los servicios que siguen pendientes</h3>
     <div class="scroll-x">
       <table>
         <thead>
@@ -669,37 +753,33 @@
             <td><span class="tag tag-stop">Antes de usar M4</span></td>
           </tr>
           <tr>
-            <td>Servicio de correo</td>
-            <td>Envío automático de presupuestos y circulares desde el dominio del despacho, con seguimiento de aperturas</td>
-            <td><span class="tag tag-warn">Alta</span></td>
-          </tr>
-          <tr>
             <td>Copias de seguridad</td>
             <td>Respaldo diario de la base de datos en producción</td>
             <td><span class="tag tag-warn">Alta</span></td>
-          </tr>
-          <tr>
-            <td>Sector por cliente</td>
-            <td>Que las circulares del DOE y el BOE lleguen segmentadas de verdad</td>
-            <td><span class="tag tag-ok">Cuando puedan</span></td>
           </tr>
         </tbody>
       </table>
     </div>
 
-    <h3>Una decisión de producto que hay que consultarles</h3>
-    <p>
-      En las pantallas de catálogo —Servicios, Proveedores, Sectores y Plantillas— los asesores
-      ven los formularios de alta aunque el sistema no les deje guardar los cambios. Los datos
-      están protegidos, pero el asesor recibe un error en lugar de no ver el botón. Hay que
-      decidir con ellos si esos formularios se ocultan a quien no es responsable o se dejan
-      visibles.
-    </p>
+    <h3>Dos detalles menores para consultarles</h3>
+    <ul class="simple">
+      <li>
+        <strong>Los formularios de catálogo.</strong> En Servicios, Proveedores, Sectores y
+        Plantillas los asesores ven los formularios de alta aunque el sistema no les deje
+        guardar. Los datos están protegidos, pero reciben un error en lugar de no ver el botón.
+        Hay que decidir si se ocultan.
+      </li>
+      <li>
+        <strong>La etiqueta «Autónomos».</strong> Se dedujo del CIF, que solo dice si es persona
+        física. Si entre esos 384 hay particulares que solo hacen la renta y no son autónomos,
+        recibirían circulares de cotización que no les tocan. Conviene preguntar si ese caso existe.
+      </li>
+    </ul>
   </section>
 
   <p class="pie">
-    Documento preparado a partir del código y del informe de calidad de la plataforma.
-    Los estados reflejan la situación en el momento de escribirlo.
+    Documento preparado a partir del código, del informe de calidad y del estado real de la
+    base de datos. Los estados reflejan la situación en el momento de escribirlo.
   </p>
 
 </div>
