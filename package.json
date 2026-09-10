@@ -21,15 +21,16 @@
     "db:presupuestos-test": "node scripts/presupuestos-test.mjs",
     "db:ocr-test": "node scripts/ocr-test.mjs",
     "seed:demo": "node scripts/seed-demo.mjs && node scripts/cargar-catalogo.mjs",
-    "catalogo": "node scripts/cargar-catalogo.mjs"
+    "catalogo": "node scripts/cargar-catalogo.mjs",
+    "e2e": "node scripts/e2e-test.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.69.0",
+    "@supabase/ssr": "^0.5.2",
+    "@supabase/supabase-js": "^2.47.10",
     "next": "16.2.9",
     "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "@supabase/supabase-js": "^2.47.10",
-    "@supabase/ssr": "^0.5.2",
-    "@anthropic-ai/sdk": "^0.69.0"
+    "react-dom": "19.2.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -40,6 +41,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "pg": "^8.13.1",
+    "playwright": "^1.63.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
