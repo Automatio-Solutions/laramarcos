@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
 import { listAuditoria } from "@/lib/repos/auditoria";
 
 const TABLAS = ["", "clientes", "servicios", "proveedores", "sectores", "cliente_sectores", "plantillas_subtareas", "usuarios"];
@@ -13,6 +15,14 @@ export default async function AuditoriaPage({
 }: {
   searchParams: Promise<{ tabla?: string; desde?: string; hasta?: string }>;
 }) {
+  // Solo staff (responsable/admin): el registro de auditoría no es para asesores.
+  // La RLS ya bloquea las filas, pero además cerramos el acceso a la página para
+  // que no aparezca vacía y sin sentido a un asesor.
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data: me } = user ? await supabase.from("usuarios").select("rol").eq("id", user.id).maybeSingle() : { data: null };
+  if (!me || (me.rol !== "responsable" && me.rol !== "admin")) redirect("/dashboard");
+
   const f = await searchParams;
   const rows = await listAuditoria(f);
 

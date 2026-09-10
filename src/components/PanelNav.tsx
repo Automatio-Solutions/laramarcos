@@ -15,7 +15,7 @@ const NAV = [
   { href: "/vigilancia", label: "Vigilancia DOE/BOE", icon: "🗞️" },
   { href: "/precontabilizacion", label: "Precontabilización", icon: "🧮" },
   { href: "/plantillas-tareas", label: "Plantillas", icon: "📁" },
-  { href: "/auditoria", label: "Auditoría", icon: "📋" },
+  { href: "/auditoria", label: "Auditoría", icon: "📋", staff: true },
   { href: "/usuarios", label: "Usuarios", icon: "👤", staff: true },
 ];
 
