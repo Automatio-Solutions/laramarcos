@@ -228,22 +228,24 @@
     flex-direction: column;
     gap: 12px;
   }
+  /* El número va posicionado, no en una rejilla: con grid, cada <strong> del
+     texto se convertía en otra celda y caía en la columna de 26px del número. */
   ol.pasos > li {
     counter-increment: paso;
-    display: grid;
-    grid-template-columns: 26px minmax(0, 1fr);
-    gap: 12px;
-    align-items: start;
+    position: relative;
+    padding-left: 38px;
     max-width: 68ch;
   }
   ol.pasos > li::before {
     content: counter(paso, decimal-leading-zero);
+    position: absolute;
+    left: 0;
+    top: 3px;
     font-family: var(--mono);
     font-size: 12px;
     font-weight: 600;
     color: var(--accent);
     font-variant-numeric: tabular-nums;
-    padding-top: 3px;
   }
 
   ul.simple {
