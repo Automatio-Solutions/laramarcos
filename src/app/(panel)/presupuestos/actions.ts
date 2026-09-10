@@ -148,6 +148,24 @@ export async function aceptarManualAction(id: string) {
   revalidatePath(`/presupuestos/${id}`);
 }
 
+/**
+ * Elimina un presupuesto.
+ *
+ * La RLS solo deja borrar al staff (responsable/admin); a un asesor le
+ * devolvería 0 filas sin error. Por eso se pide el id borrado y se avisa,
+ * en lugar de fingir que se hizo.
+ *
+ * El borrado queda registrado en Auditoría por el trigger de la tabla.
+ */
+export async function eliminarPresupuestoAction(id: string): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("presupuestos").delete().eq("id", id).select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "No tienes permiso para eliminar este presupuesto." };
+  revalidatePath("/presupuestos");
+  return {};
+}
+
 export async function rechazarPresupuestoAction(id: string) {
   const supabase = await createClient();
   await supabase.from("presupuestos").update({ estado: "rechazado", rechazado_at: new Date().toISOString() }).eq("id", id);
