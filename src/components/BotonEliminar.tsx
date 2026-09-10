@@ -4,33 +4,37 @@ import { useState, useTransition } from "react";
 import { ConfirmModal } from "@/components/ConfirmModal";
 
 /**
- * Botón de borrado de un presupuesto, para la última columna de la lista.
+ * X roja de borrado con confirmación, para la última columna de una tabla.
  *
- * Corta la propagación del clic: la fila entera es un enlace al presupuesto,
- * así que sin esto pulsar la X abriría el detalle en lugar de borrar.
+ * Corta la propagación del clic: en las tablas cuya fila entera es un enlace,
+ * sin esto pulsar la X abriría el detalle en lugar de borrar.
+ *
+ * Quien lo usa decide si mostrarlo: la RLS solo deja borrar al staff, así que
+ * enseñárselo a un asesor sería darle un "no tienes permiso" garantizado.
  */
-export function EliminarPresupuesto({
+export function BotonEliminar({
   id,
-  cliente,
-  estado,
+  descripcion,
+  titulo,
+  mensaje,
   onEliminar,
 }: {
   id: string;
-  cliente: string;
-  estado: string;
+  /** Para el lector de pantalla: "Eliminar {descripcion}". */
+  descripcion: string;
+  titulo: string;
+  mensaje: string;
   onEliminar: (id: string) => Promise<{ error?: string }>;
 }) {
   const [abierto, setAbierto] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const aceptado = estado === "aceptado";
-
   return (
     <>
       <button
         type="button"
-        aria-label={`Eliminar el presupuesto de ${cliente}`}
+        aria-label={`Eliminar ${descripcion}`}
         title="Eliminar"
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); setError(null); setAbierto(true); }}
         className="rounded-md px-2 py-1 text-base font-semibold leading-none text-error transition-colors hover:bg-error/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-error"
@@ -42,12 +46,8 @@ export function EliminarPresupuesto({
 
       {abierto && (
         <ConfirmModal
-          titulo="Eliminar presupuesto"
-          mensaje={
-            aceptado
-              ? `El presupuesto de ${cliente} está ACEPTADO y tiene una tarea asociada, que no se borrará. Perderás el registro de lo que se presupuestó y se aceptó. ¿Seguro?`
-              : `Se eliminará el presupuesto de ${cliente}. Esta acción no se puede deshacer.`
-          }
+          titulo={titulo}
+          mensaje={mensaje}
           confirmLabel="Eliminar"
           danger
           pending={pending}

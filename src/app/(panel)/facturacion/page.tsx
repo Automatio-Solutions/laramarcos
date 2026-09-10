@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
-import { setImporteAction, marcarFacturadaAction } from "./actions";
+import { setImporteAction, marcarFacturadaAction, eliminarLineaAction } from "./actions";
+import { BotonEliminar } from "@/components/BotonEliminar";
 
 const eur = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" });
 
@@ -20,6 +21,14 @@ export default async function FacturacionPage() {
     .eq("facturada", false)
     .order("created_at", { ascending: false });
   const lineas = (data ?? []) as unknown as LineaRow[];
+
+  // La RLS solo deja borrar al staff: se oculta la X al resto en lugar de
+  // enseñar un botón que siempre les diría "no tienes permiso".
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data: me } = user
+    ? await supabase.from("usuarios").select("rol").eq("id", user.id).maybeSingle()
+    : { data: null };
+  const puedeEliminar = me?.rol === "responsable" || me?.rol === "admin";
 
   // Agrupar por cliente
   const porCliente = new Map<string, LineaRow[]>();
@@ -65,6 +74,17 @@ export default async function FacturacionPage() {
                         <button className="rounded-md bg-success px-3 py-1 text-xs font-medium text-white">Marcar facturada</button>
                       </form>
                     </td>
+                    {puedeEliminar && (
+                      <td className="px-2 py-2.5 text-right align-middle">
+                        <BotonEliminar
+                          id={l.id}
+                          descripcion={`la línea «${l.concepto}»`}
+                          titulo="Eliminar línea de facturación"
+                          mensaje={`Se eliminará «${l.concepto}» de ${cliente}. Si la gestión sí se hizo y solo quieres sacarla de aquí, usa «Marcar facturada» en su lugar: eso conserva el histórico del cliente.`}
+                          onEliminar={eliminarLineaAction}
+                        />
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

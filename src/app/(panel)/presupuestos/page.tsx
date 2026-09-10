@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { listPresupuestos } from "@/lib/repos/presupuestos";
-import { EliminarPresupuesto } from "@/components/EliminarPresupuesto";
+import { BotonEliminar } from "@/components/BotonEliminar";
 import { eliminarPresupuestoAction } from "./actions";
 import { createClient } from "@/lib/supabase/server";
 
@@ -80,10 +80,15 @@ export default async function PresupuestosPage() {
                   </td>
                   {puedeEliminar && (
                     <td className="px-2 py-3 text-right align-middle">
-                      <EliminarPresupuesto
+                      <BotonEliminar
                         id={p.id}
-                        cliente={cliente}
-                        estado={p.estado}
+                        descripcion={`el presupuesto de ${cliente}`}
+                        titulo="Eliminar presupuesto"
+                        mensaje={
+                          p.estado === "aceptado"
+                            ? `El presupuesto de ${cliente} está ACEPTADO y tiene una tarea asociada, que no se borrará. Perderás el registro de lo que se presupuestó y se aceptó. ¿Seguro?`
+                            : `Se eliminará el presupuesto de ${cliente}. Esta acción no se puede deshacer.`
+                        }
                         onEliminar={eliminarPresupuestoAction}
                       />
                     </td>
