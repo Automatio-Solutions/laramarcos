@@ -7,9 +7,9 @@
 ## Resultado global
 
 **✅ APTO PARA ENTREGA.** Se probó cada punto accesible de la aplicación en 8 capas
-(incluido navegador real con Playwright, tras detectarse que la prueba por HTTP no
-cubría la navegación de cliente). Se encontraron y **corrigieron 3 bugs reales** y se
-**modernizaron 2 tests desactualizados**.
+(incluido un **test E2E completo en navegador real** con Playwright, tras detectarse que
+la prueba por HTTP no cubría la navegación ni las interacciones de cliente). Se
+encontraron y **corrigieron 4 bugs reales** y se **modernizaron 2 tests desactualizados**.
 No queda ningún fallo abierto salvo lo que está pendiente de construir (depende de
 servicios externos que aporta el cliente: Resend, VPS, Supabase Pro).
 
@@ -22,7 +22,7 @@ servicios externos que aporta el cliente: Resend, VPS, Supabase Pro).
 | 5. Páginas de detalle | Ficha de tarea, editor de presupuesto, PDF, aceptación pública, revisión OCR (con datos reales) | ✅ contenido correcto |
 | 6. Control de acceso | Aislamiento por oficina y por rol (asesor / responsable / admin) | ✅ correcto (tras corregir 2 fugas) |
 | 7. IA en vivo | M2 presupuestos y M3 DOE/BOE contra la API real de Claude | ✅ correcto |
-| 8. Navegador (E2E) | Playwright: login, botones "nuevo", modales de tarea (clic real) | ✅ 8/8 (tras corregir 1 bug) |
+| 8. Navegador (E2E completo) | Playwright, 23 comprobaciones de interacción real: crear/editar/arrastrar/adjuntar tareas, cuentas y servicios de cliente, catálogos, dashboard, presupuesto IA | ✅ 23/23 (tras corregir 2 bugs) |
 
 ---
 
@@ -47,6 +47,22 @@ servicios externos que aporta el cliente: Resend, VPS, Supabase Pro).
 - **Por qué la primera pasada no lo cazó (lección aprendida)**: las capas 1-7 comprobaban las rutas por HTTP (carga directa), donde `/tareas/nuevo` respondía 200. Un bug que solo aparece en la navegación de cliente exige un **navegador real**. Por eso se añadió la **capa 8 (Playwright)** y un test de regresión permanente (`npm run e2e`).
 - **Corrección**: un interceptor específico para `/tareas/nuevo` que abre el formulario de alta **en el mismo modal** (coherente con cómo se abren las tareas). Por URL directa se sigue mostrando la página completa.
 - **Verificación (navegador)**: pulsar "Nueva tarea" abre el formulario, sin 404; abrir una tarea existente muestra su detalle en modal; Esc cierra. Se comprobó además que los botones "nuevo" de Clientes, Servicios y Proveedores no tenían el mismo problema.
+
+### BUG-04 · Una tarea recién creada no se veía hasta recargar 🔴
+- **Módulo**: M1 · `/tareas`.
+- **Síntoma**: al crear una tarea, se guardaba bien, pero **no aparecía en el tablero** hasta refrescar la página (verificado en navegador: 0 tarjetas justo tras crear, 1 tras recargar).
+- **Causa**: la misma arquitectura de modal del BUG-03. El primer arreglo del 404 (abrir "Nueva tarea" en modal) dejaba el tablero montado detrás; al crear y redirigir a `/tareas`, la caché del router servía el tablero antiguo pese a `revalidatePath`.
+- **Corrección definitiva (resuelve BUG-03 y BUG-04 a la vez)**: "Nueva tarea" pasa a ser una **navegación completa** (no interceptada). Así el formulario es página propia, no se intercepta (sin 404), y al crear + redirigir el tablero se recarga fresco (la tarea aparece al momento).
+- **Verificación (navegador)**: crear una tarea la muestra en el tablero sin recargar; se probó además todo el ciclo (editar descripción, subtareas, comentarios, tiempo, adjuntar fichero, botones de flujo, **arrastrar tarjetas** entre columnas, archivar → aparece en Archivo).
+
+### Cobertura E2E completa (capa 8)
+El test de navegador (`npm run e2e`) recorre, con clics e interacciones reales:
+- **Tareas**: crear en formulario, abrir en modal, editar descripción, añadir subtarea/comentario/tiempo, **adjuntar fichero**, botones "Empezar/Completar", **arrastrar tarjetas** entre columnas, archivar con confirmación, ver en Archivo.
+- **Clientes**: crear con oficina y **dos cuentas IBAN** (botón +), ver las cuentas en la ficha, **contratar un servicio con cuota**, filtrar/buscar.
+- **Catálogos**: crear servicio, proveedor y sector.
+- **Dashboard**: clic en un empleado → sus tareas filtradas.
+- **Presupuestos**: generación con IA → editor con IVA (opcional, `E2E_IA=1`).
+Todo el flujo sin un solo error de JavaScript en el navegador. Los datos de prueba se etiquetan y se purgan al terminar.
 
 ### Tests modernizados (no eran bugs de la app, pero rompían el suite)
 - **`rls-test`**: estaba escrito para el modelo antiguo (visibilidad por `asesor_id`). Reescrito al modelo por **oficina**, añadiendo la comprobación nueva (dos asesores de la misma sede se ven entre sí). 9/9.
