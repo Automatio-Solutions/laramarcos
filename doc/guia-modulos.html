@@ -1,0 +1,787 @@
+<title>Manual LaraMarcos Asesores</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --navy:        #1F223E;
+    --navy-deep:   #15172B;
+    --accent:      #5B6699;
+    --accent-soft: #ECEEF5;
+    --ground:      #FFFFFF;
+    --raised:      #F8F9FA;
+    --hairline:    #E2E4E9;
+    --ink:         #1F223E;
+    --body:        #424755;
+    --muted:       #6E7585;
+    --ok:          #0E9F6E;
+    --warn:        #B45309;
+    --stop:        #DC2626;
+    --ok-soft:     #E7F6F0;
+    --warn-soft:   #FDF3E3;
+    --stop-soft:   #FCEBEB;
+
+    --sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --r: 8px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --navy:        #C9CEE6;
+      --navy-deep:   #E7E9F2;
+      --accent:      #98A3D0;
+      --accent-soft: #24284A;
+      --ground:      #131528;
+      --raised:      #1B1E36;
+      --hairline:    #2C3050;
+      --ink:         #E7E9F2;
+      --body:        #BFC4D6;
+      --muted:       #8D93AC;
+      --ok:          #34D399;
+      --warn:        #FBBF24;
+      --stop:        #F87171;
+      --ok-soft:     #13322A;
+      --warn-soft:   #33270E;
+      --stop-soft:   #35191C;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --navy:        #C9CEE6;
+    --navy-deep:   #E7E9F2;
+    --accent:      #98A3D0;
+    --accent-soft: #24284A;
+    --ground:      #131528;
+    --raised:      #1B1E36;
+    --hairline:    #2C3050;
+    --ink:         #E7E9F2;
+    --body:        #BFC4D6;
+    --muted:       #8D93AC;
+    --ok:          #34D399;
+    --warn:        #FBBF24;
+    --stop:        #F87171;
+    --ok-soft:     #13322A;
+    --warn-soft:   #33270E;
+    --stop-soft:   #35191C;
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--body);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.65;
+    /* Plus Jakarta Sans trae un espacio muy estrecho: se compensa aquí. */
+    word-spacing: 0.06em;
+    overflow-wrap: break-word;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 780px;
+    margin: 0 auto;
+    padding-inline: 24px;
+    padding-block: 56px 96px;
+  }
+
+  /* ---------- Cabecera ---------- */
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .doc-title {
+    font-size: clamp(30px, 6vw, 42px);
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    color: var(--navy);
+    text-wrap: balance;
+    margin: 10px 0 0;
+  }
+  .lede {
+    font-size: 18px;
+    line-height: 1.6;
+    color: var(--body);
+    margin: 16px 0 0;
+    max-width: 62ch;
+  }
+  .rule {
+    height: 1px;
+    background: var(--hairline);
+    border: 0;
+    margin-block: 44px;
+  }
+
+  /* ---------- Tipografía general ---------- */
+  h2 {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    color: var(--navy);
+    line-height: 1.2;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h3 {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--ink);
+    margin: 32px 0 10px;
+  }
+  p { margin: 0 0 14px; max-width: 68ch; }
+  strong { color: var(--ink); font-weight: 600; }
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--accent-soft);
+    color: var(--accent);
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+
+  /* ---------- Tabla resumen ---------- */
+  .scroll-x { overflow-x: auto; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 14.5px;
+    min-width: 460px;
+  }
+  th {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 0 12px 8px 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+  td {
+    padding: 11px 12px 11px 0;
+    border-bottom: 1px solid var(--hairline);
+    vertical-align: top;
+  }
+  td:first-child {
+    font-family: var(--mono);
+    font-weight: 600;
+    color: var(--navy);
+    white-space: nowrap;
+  }
+
+  .tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .tag-ok   { background: var(--ok-soft);   color: var(--ok); }
+  .tag-warn { background: var(--warn-soft); color: var(--warn); }
+  .tag-stop { background: var(--stop-soft); color: var(--stop); }
+
+  /* ---------- Módulos ---------- */
+  .modulo { margin-top: 64px; }
+  .modulo-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding-bottom: 14px;
+    border-bottom: 2px solid var(--navy);
+    margin-bottom: 24px;
+  }
+  .plate {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ground);
+    background: var(--navy);
+    padding: 4px 9px;
+    border-radius: 5px;
+    letter-spacing: 0.04em;
+  }
+  .modulo-sub {
+    font-size: 15px;
+    color: var(--muted);
+    margin: -14px 0 24px;
+    max-width: 64ch;
+  }
+
+  /* ---------- Pasos ---------- */
+  ol.pasos {
+    list-style: none;
+    counter-reset: paso;
+    margin: 0 0 18px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  /* El número va posicionado, no en una rejilla: con grid, cada <strong> del
+     texto se convertía en otra celda y caía en la columna de 26px del número. */
+  ol.pasos > li {
+    counter-increment: paso;
+    position: relative;
+    padding-left: 38px;
+    max-width: 68ch;
+  }
+  ol.pasos > li::before {
+    content: counter(paso, decimal-leading-zero);
+    position: absolute;
+    left: 0;
+    top: 3px;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+
+  ul.simple {
+    margin: 0 0 16px;
+    padding-left: 18px;
+    max-width: 68ch;
+  }
+  ul.simple > li { margin-bottom: 7px; }
+
+  /* ---------- Recuadro de demo ---------- */
+  .demo {
+    background: var(--raised);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r);
+    padding: 18px 20px;
+    margin-top: 22px;
+  }
+  .demo .eyebrow { color: var(--accent); }
+  .demo p { margin: 8px 0 0; font-size: 15px; }
+  .demo p:last-child { margin-bottom: 0; }
+
+  /* ---------- Aviso ---------- */
+  .aviso {
+    border-left: 3px solid var(--warn);
+    background: var(--warn-soft);
+    border-radius: 0 var(--r) var(--r) 0;
+    padding: 14px 18px;
+    margin: 22px 0;
+    font-size: 15px;
+  }
+  .aviso p { margin: 0; }
+  .aviso strong { color: var(--ink); }
+
+  /* ---------- Listado de roles / nav ---------- */
+  dl.pares {
+    display: grid;
+    grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+    gap: 10px 20px;
+    margin: 0 0 18px;
+    font-size: 15px;
+    align-items: baseline;
+  }
+  dl.pares dt {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.45;
+    color: var(--navy);
+  }
+  dl.pares dd { margin: 0; min-width: 0; }
+
+  /* ---------- Cierre ---------- */
+  .cierre {
+    margin-top: 64px;
+    padding-top: 28px;
+    border-top: 2px solid var(--navy);
+  }
+  .pie {
+    margin-top: 56px;
+    padding-top: 18px;
+    border-top: 1px solid var(--hairline);
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  @media (max-width: 700px) {
+    dl.pares { grid-template-columns: 1fr; gap: 2px 0; }
+    dl.pares dd { margin-bottom: 12px; }
+  }
+
+  @media (max-width: 520px) {
+    .wrap { padding-block: 36px 64px; }
+    .doc-title { letter-spacing: -0.01em; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">Guion de presentación · Despacho LaraMarcos Asesores</p>
+    <h1 class="doc-title">Manual de los cinco módulos</h1>
+    <p class="lede">
+      Cómo funciona cada parte de la plataforma, en el orden en que conviene enseñarla:
+      qué problema resuelve, qué hace el usuario paso a paso y qué se puede demostrar en vivo.
+    </p>
+  </header>
+
+  <hr class="rule">
+
+  <h2>Antes de entrar en los módulos</h2>
+
+  <h3>Cómo se accede</h3>
+  <p>
+    Cada empleado entra con su email y contraseña en la pantalla de acceso. No hay usuarios
+    compartidos: todo lo que se hace queda registrado con nombre y hora en el módulo de Auditoría.
+    El menú lateral izquierdo es siempre el mismo y cambia según quién entra.
+  </p>
+
+  <h3>Los tres perfiles</h3>
+  <dl class="pares">
+    <dt>Asesor</dt>
+    <dd>Trabaja con las tareas, los clientes y los presupuestos <strong>de su oficina</strong>. No ve la cartera de las demás.</dd>
+    <dt>Responsable</dt>
+    <dd>Todo lo anterior más la visión completa del despacho: archivo histórico, reparto de trabajo y facturación.</dd>
+    <dt>Administrador</dt>
+    <dd>Añade lo anterior la gestión de usuarios, el registro de auditoría y la importación de carteras.</dd>
+  </dl>
+  <p>
+    Este reparto no es cosmético: está aplicado en la propia base de datos. Aunque alguien
+    escribiese a mano la dirección de una pantalla que no le corresponde, el sistema no le
+    devuelve los datos. Es un punto que conviene subrayar en la reunión, porque es la
+    diferencia entre «ocultar un botón» y proteger de verdad la información fiscal de los clientes.
+  </p>
+
+  <h3>Los cinco módulos de un vistazo</h3>
+  <div class="scroll-x">
+    <table>
+      <thead>
+        <tr><th>Mód.</th><th>Qué resuelve</th><th>Estado</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>M1</td>
+          <td>Tareas, clientes y facturación pendiente</td>
+          <td><span class="tag tag-ok">Operativo</span></td>
+        </tr>
+        <tr>
+          <td>M2</td>
+          <td>Presupuestos con ayuda de IA y aceptación del cliente</td>
+          <td><span class="tag tag-warn">Correo ya construido</span></td>
+        </tr>
+        <tr>
+          <td>M3</td>
+          <td>Vigilancia diaria del DOE y el BOE</td>
+          <td><span class="tag tag-warn">Ya se descarga sola</span></td>
+        </tr>
+        <tr>
+          <td>M4</td>
+          <td>Lectura automática de facturas hacia Aplifisa</td>
+          <td><span class="tag tag-warn">Operativo, pendiente el servidor</span></td>
+        </tr>
+        <tr>
+          <td>M5</td>
+          <td>Base de datos única del despacho</td>
+          <td><span class="tag tag-ok">Operativo</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="demo" style="margin-top:28px">
+    <p class="eyebrow">Avance desde la última versión</p>
+    <p>
+      El dominio de correo está verificado, <strong>crm.laramarcosasesores.es ya funciona</strong>,
+      la plataforma descarga el DOE y el BOE por su cuenta —sin depender de ninguna herramienta
+      externa— y <strong>los 594 clientes ya tienen sector asignado</strong>. Lo que queda son
+      decisiones del despacho, no programación. Están todas al final.
+    </p>
+  </div>
+
+  <!-- ============ M1 ============ -->
+  <section class="modulo">
+    <div class="modulo-head">
+      <span class="plate">M1</span>
+      <h2>Tareas y clientes</h2>
+    </div>
+    <p class="modulo-sub">
+      El módulo donde el despacho vive cada día. Es el que más tiempo merece en la reunión.
+    </p>
+
+    <h3>Las tres formas de ver el trabajo</h3>
+    <p>
+      La misma información se presenta de tres maneras, y se cambia entre ellas con el
+      selector de la parte superior:
+    </p>
+    <ul class="simple">
+      <li><strong>Tablero</strong> — columnas de Pendiente, En curso y Completada. Las tareas se arrastran de una a otra con el ratón. Es la vista por defecto.</li>
+      <li><strong>Lista</strong> — la misma cartera en formato tabla, cómoda para revisar volumen o buscar algo concreto.</li>
+      <li><strong>Calendario</strong> — mes a mes, para ver los vencimientos agrupados por día. Útil en campaña de renta o cierres trimestrales.</li>
+    </ul>
+    <p>
+      Sobre cualquiera de las tres actúan los mismos filtros: responsable, cliente, estado,
+      categoría y rango de fechas. Un asesor puede dejarse filtrado «mis tareas de esta semana»
+      y trabajar siempre ahí.
+    </p>
+
+    <h3>Qué hay dentro de una tarea</h3>
+    <ol class="pasos">
+      <li>Se crea con el botón <strong>Nueva tarea</strong>: cliente, responsable, vencimiento y categoría.</li>
+      <li>Se le añaden <strong>subtareas</strong>, cada una con su propio responsable. Así una gestión larga se reparte entre varias personas sin perder la unidad.</li>
+      <li>Se pueden marcar <strong>dependencias</strong> entre tareas. Cuando una tarea espera a otra, el sistema la marca como <strong>Bloqueada</strong> automáticamente; nadie tiene que acordarse de hacerlo.</li>
+      <li>En los comentarios se menciona a un compañero escribiendo <code>@</code> y su nombre. Le llega el aviso a la campanilla de notificaciones.</li>
+      <li>Se adjuntan documentos a la propia tarea, de modo que el expediente no se dispersa por el correo.</li>
+    </ol>
+    <p>
+      Un detalle que suele gustar en la demostración: si se intenta dar por completada una tarea
+      que aún tiene subtareas abiertas, el sistema avisa y pide confirmación expresa. No lo
+      impide —a veces hay motivos—, pero obliga a que sea una decisión consciente.
+    </p>
+
+    <h3>La ficha 360 del cliente</h3>
+    <p>
+      Desde <strong>Clientes</strong> se entra en la ficha de cualquiera. Ahí está todo lo suyo en
+      una sola pantalla: los datos fiscales, sus cuentas bancarias, los servicios que tiene
+      contratados, el histórico completo de tareas y las líneas de factura. Es la respuesta a
+      «¿qué le hemos hecho a este cliente y qué le hemos cobrado?» sin abrir cuatro programas.
+    </p>
+
+    <h3>Facturación pendiente: el módulo que evita las fugas</h3>
+    <p>
+      Esta pantalla es probablemente el mejor argumento comercial de toda la plataforma.
+      Cada gestión completada genera su línea pendiente de facturar, agrupada por cliente,
+      con el importe acumulado a la vista. Se revisa, se ajusta si hace falta y se marca
+      como facturada.
+    </p>
+    <p>
+      La frase que resume el módulo está escrita en la propia pantalla:
+      <strong>ninguna gestión completada queda sin cobrar</strong>. Si el despacho ha tenido
+      alguna vez la sensación de que se factura menos de lo que se trabaja, aquí es donde se ve.
+    </p>
+
+    <div class="demo">
+      <p class="eyebrow">Cómo demostrarlo</p>
+      <p>
+        Arrastre una tarea de Pendiente a Completada en el tablero, y acto seguido abra
+        Facturación: la línea correspondiente ya está esperando. Ese recorrido de diez
+        segundos explica el módulo mejor que cualquier descripción.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ M2 ============ -->
+  <section class="modulo">
+    <div class="modulo-head">
+      <span class="plate">M2</span>
+      <h2>Presupuestos</h2>
+    </div>
+    <p class="modulo-sub">
+      De una frase escrita a mano a un presupuesto cerrado y convertido en trabajo asignado.
+    </p>
+
+    <h3>El recorrido completo</h3>
+    <ol class="pasos">
+      <li>
+        En <strong>Presupuestos → Nuevo</strong> se elige el cliente y se escribe en lenguaje
+        normal lo que se quiere presupuestar. Por ejemplo:
+        <em>«Constitución de SL para Martínez, 3 socios, incluir estatutos y alta en Hacienda».</em>
+      </li>
+      <li>
+        Al pulsar <strong>Generar presupuesto</strong>, la IA consulta el <strong>tarifario real
+        del despacho</strong> guardado en la base de datos y monta un borrador con sus líneas
+        y sus precios. No inventa importes: usa los del catálogo.
+      </li>
+      <li>
+        El borrador se abre en un editor donde todo es modificable: conceptos, cantidades,
+        precios, descuento global, condiciones y días de validez. El IVA se aplica al 21 %.
+        <strong>La última palabra siempre es de la persona.</strong>
+      </li>
+      <li>
+        Se envía al cliente, que recibe un <strong>enlace propio</strong>. Al abrirlo, el
+        presupuesto queda marcado como visto en el panel: se sabe si el cliente lo ha leído.
+      </li>
+      <li>
+        En esa página el cliente pulsa <strong>Aceptar</strong> o <strong>Rechazar</strong>.
+        No tiene que registrarse ni instalar nada.
+      </li>
+      <li>
+        Al aceptar, la plataforma <strong>crea sola la tarea y todas sus subtareas</strong>
+        a partir de la plantilla del servicio contratado. El presupuesto aceptado se convierte
+        en trabajo organizado sin que nadie teclee nada.
+      </li>
+    </ol>
+    <p>
+      También existe la aceptación manual desde el panel, para cuando el cliente contesta
+      por teléfono o en persona: el efecto es el mismo.
+    </p>
+
+    <h3>Presupuestos recurrentes</h3>
+    <p>
+      Los servicios que se repiten cada cierto tiempo se configuran una vez, indicando la
+      periodicidad. La plataforma genera el presupuesto correspondiente cuando toca, sin
+      que nadie lleve la cuenta en una agenda.
+    </p>
+
+    <div class="aviso">
+      <p>
+        <strong>Punto a tratar en la reunión.</strong> El correo ya está montado: el dominio
+        del despacho está verificado y el envío construido. Falta una sola decisión, que es
+        suya: <strong>desde qué dirección quieren que salgan los presupuestos y a cuál quieren
+        que lleguen las respuestas de los clientes</strong>. Está al final, en el punto 3.
+      </p>
+    </div>
+
+    <div class="demo">
+      <p class="eyebrow">Cómo demostrarlo</p>
+      <p>
+        Genere un presupuesto real delante de ellos escribiendo un encargo típico del despacho.
+        Ver cómo el texto libre se convierte en líneas con los precios de su propio tarifario
+        es el momento más vistoso de toda la plataforma. Después abra el enlace del cliente
+        en otra pestaña y acepte: aparece la tarea creada con sus subtareas.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ M3 ============ -->
+  <section class="modulo">
+    <div class="modulo-head">
+      <span class="plate">M3</span>
+      <h2>Vigilancia del DOE y el BOE</h2>
+    </div>
+    <p class="modulo-sub">
+      El módulo que convierte al despacho en proactivo: avisar al cliente antes de que pregunte.
+    </p>
+
+    <h3>Qué hace cada mañana</h3>
+    <ol class="pasos">
+      <li>Se descargan las publicaciones del día del Diario Oficial de Extremadura y del Boletín Oficial del Estado.</li>
+      <li>La IA las lee y las <strong>clasifica por sector</strong>: qué afecta a hostelería, qué a autónomos, qué a agricultura, según los sectores definidos por el despacho.</li>
+      <li>Prepara una <strong>circular por cada sector</strong>, dirigida solo a los clientes de ese sector. Nadie recibe normativa que no le incumbe.</li>
+      <li>Cuando algo tiene plazo o urgencia, <strong>crea directamente una tarea</strong> en el módulo de tareas, marcada con su origen.</li>
+    </ol>
+    <p>
+      Hay una regla deliberada que conviene mencionar: <strong>si un día no hay novedades, no
+      se envía nada</strong>. El valor de la circular está en que, cuando llega, significa algo.
+    </p>
+    <p>
+      La pantalla de <strong>Vigilancia</strong> muestra las circulares preparadas, a cuántos
+      destinatarios van dirigidas y si están enviadas o pendientes.
+    </p>
+
+    <div class="aviso">
+      <p>
+        <strong>Ya hay sectores, y hay circulares que se pueden mandar mañana.</strong>
+        Toda la cartera está clasificada por forma jurídica: <strong>384 autónomos y 210
+        sociedades</strong>. Eso no es poca cosa, porque la normativa que más les afecta
+        —cotización del RETA, módulos, IRPF, impuesto de sociedades— depende precisamente de
+        eso y no de la actividad. Son las dos circulares con más lectores del despacho y están
+        listas: 275 autónomos y 146 sociedades tienen email.
+      </p>
+      <p style="margin-top:12px">
+        Lo que falta es el <strong>sector de actividad</strong>. Solo 46 clientes de 594 se
+        pueden deducir del nombre, porque el 65% de la cartera son autónomos que figuran con
+        su nombre y apellidos. Ese dato hay que pedirlo, y es el punto 2 del final.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ M4 ============ -->
+  <section class="modulo">
+    <div class="modulo-head">
+      <span class="plate">M4</span>
+      <h2>Precontabilización de facturas</h2>
+    </div>
+    <p class="modulo-sub">
+      Quitar de en medio el tecleo de facturas, sin renunciar a la revisión humana.
+    </p>
+
+    <h3>El recorrido</h3>
+    <ol class="pasos">
+      <li>Se sube la factura desde la pantalla de <strong>Precontabilización</strong>, indicando a qué cliente pertenece. Admite PDF y fotos o escaneos en JPG y PNG.</li>
+      <li>La IA lee el documento y extrae proveedor, CIF, base imponible, tipo de IVA y la subcuenta contable que corresponde.</li>
+      <li>El sistema <strong>recuerda a los proveedores</strong>: con cada factura procesada de un proveedor conocido, acierta más y necesita menos correcciones.</li>
+      <li>Cada línea recibe un <strong>porcentaje de confianza</strong> con su color, para saber dónde mirar.</li>
+      <li>Se revisa lo que haga falta, se aprueba, y se descarga el <strong>Excel en modelo Aplifisa</strong> listo para importar en el programa contable.</li>
+    </ol>
+
+    <h3>El semáforo, que es la clave del módulo</h3>
+    <dl class="pares">
+      <dt>Verde · 90 % o más</dt>
+      <dd>La lectura es fiable. Se aprueba directamente.</dd>
+      <dt>Naranja · entre 60 % y 90 %</dt>
+      <dd>Conviene un vistazo rápido antes de aprobar.</dd>
+      <dt>Rojo · menos del 60 %</dt>
+      <dd>Hay que revisarla con calma: suele ser un escaneo malo o un proveedor nuevo.</dd>
+    </dl>
+    <p>
+      El mensaje para el despacho es este: <strong>la máquina no contabiliza sola, prepara el
+      trabajo</strong>. Quien contabiliza sigue siendo el profesional, pero dedica su tiempo a
+      las facturas dudosas en lugar de teclear las cien que estaban bien.
+    </p>
+
+    <div class="aviso">
+      <p>
+        <strong>Antes de usarlo con facturas reales.</strong> Está previsto que los documentos
+        de los clientes se guarden en el servidor propio del despacho, no en la nube. Ese
+        servidor todavía no está montado, así que conviene no cargar facturas reales hasta
+        que lo esté. Es la única condición técnica realmente importante de toda la puesta en marcha.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ M5 ============ -->
+  <section class="modulo">
+    <div class="modulo-head">
+      <span class="plate">M5</span>
+      <h2>La base de datos única</h2>
+    </div>
+    <p class="modulo-sub">
+      No es una pantalla: es el cimiento del que se alimentan los otros cuatro módulos.
+    </p>
+    <p>
+      Es lo más difícil de enseñar y lo más importante de explicar. Clientes, servicios,
+      proveedores, sectores y plantillas de trabajo viven <strong>una sola vez</strong>. El
+      tarifario que consulta la IA de presupuestos es el mismo que factura el módulo de
+      facturación; el cliente de una tarea es el mismo cuya factura lee el OCR.
+    </p>
+    <p>
+      Actualmente contiene la <strong>cartera real del despacho, con 594 clientes ya cargados</strong>.
+      No es una maqueta con datos inventados: es su información.
+    </p>
+
+    <h3>Qué aporta en la práctica</h3>
+    <ul class="simple">
+      <li><strong>Validación en el alta</strong> — el CIF, el NIF y el IBAN se comprueban al escribirlos. Un dato mal tecleado no entra.</li>
+      <li><strong>Separación por oficina</strong> — cada oficina trabaja con su cartera; la dirección ve el conjunto.</li>
+      <li><strong>Registro de auditoría</strong> — quién cambió qué y cuándo, consultable por la dirección.</li>
+      <li><strong>Plantillas de trabajo</strong> — cada servicio lleva asociada su lista de subtareas, y es lo que se despliega solo al aceptarse un presupuesto.</li>
+    </ul>
+  </section>
+
+  <!-- ============ Cierre ============ -->
+  <section class="cierre">
+    <h2>Lo que hay que resolver en la reunión</h2>
+    <p>
+      La aplicación está construida y probada. Todo lo que queda son decisiones o datos
+      que solo puede dar el despacho. Van ordenados por lo que bloquean.
+    </p>
+
+    <h3>1 · Los enlaces a las carpetas de los clientes</h3>
+    <p>
+      La ficha de cada cliente tiene ya un campo para la dirección de su carpeta en la nube:
+      se pega el enlace y aparece como acceso directo en su ficha, de modo que cualquier
+      asesor llega a la documentación del cliente sin salir de la plataforma.
+      <strong>Ahora mismo solo 3 clientes de 594 lo tienen puesto.</strong>
+    </p>
+    <p>
+      Como están cambiando el servidor de proveedor, la pregunta concreta es:
+      <strong>¿con quién hay que hablar para obtener la dirección de las carpetas una vez
+      hecha la mudanza?</strong> Conviene esperar a que el traslado termine antes de cargar
+      nada: si los enlaces cambian con el cambio de proveedor, se haría el trabajo dos veces.
+    </p>
+
+    <h3>2 · El sector de cada cliente</h3>
+    <p>
+      Toda la cartera está ya clasificada como autónomo o sociedad, de forma automática y sin
+      margen de error. Lo que falta es la actividad, y ese dato no está en ningún sitio del
+      que se pueda deducir: el 65% de los clientes figuran con su nombre y apellidos.
+    </p>
+    <p>
+      <strong>Llevas preparado un fichero por oficina</strong>, listo para abrir con Excel,
+      con la lista de sus clientes y una columna para escribir el sector:
+    </p>
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>Oficina</th><th>Clientes</th><th>Con email</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Badajoz</td><td>206</td><td>197</td></tr>
+          <tr><td>Don Benito</td><td>178</td><td>124</td></tr>
+          <tr><td>Castuera</td><td>113</td><td>33</td></tr>
+          <tr><td>Orellana</td><td>97</td><td>67</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:16px">
+      Cada fichero lleva también una columna para el enlace de la carpeta del punto anterior,
+      por si prefieren rellenar las dos cosas de una vez. Al devolverlos se cargan en la
+      plataforma sin trabajo manual.
+    </p>
+    <div class="demo">
+      <p class="eyebrow">El atajo que puede ahorrar toda esta tarea</p>
+      <p>
+        Si Aplifisa puede exportar el <strong>epígrafe de IAE</strong> de cada cliente, no hace
+        falta que nadie rellene nada: ese dato traduce a sector de forma automática y resuelve
+        los 594 de golpe, autónomos incluidos. Merece la pena preguntarlo antes de repartir
+        los ficheros.
+      </p>
+    </div>
+
+    <h3>3 · Las direcciones de correo</h3>
+    <p>
+      El correo está montado y el dominio verificado. Falta que decidan dos cosas, y son
+      independientes entre sí:
+    </p>
+    <dl class="pares">
+      <dt>Remitente</dt>
+      <dd>Desde qué dirección salen los presupuestos y desde cuál las circulares del DOE y el BOE. Pueden ser la misma o distintas.</dd>
+      <dt>Respuestas</dt>
+      <dd>A qué buzón llegan las contestaciones de los clientes. <strong>No tiene por qué ser la misma dirección</strong>, y no hace falta abrir un buzón nuevo: puede ser el correo que ya miran cada día.</dd>
+    </dl>
+    <p>
+      Es la última pieza que falta para que los presupuestos salgan solos. En cuanto lo
+      confirmen, se aplica en un rato.
+    </p>
+
+    <h3>4 · Los servicios que siguen pendientes</h3>
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>Punto</th><th>Qué desbloquea</th><th>Urgencia</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Servidor propio</td>
+            <td>Guardar las facturas de los clientes fuera de la nube, como exige el propio pliego del proyecto</td>
+            <td><span class="tag tag-stop">Antes de usar M4</span></td>
+          </tr>
+          <tr>
+            <td>Copias de seguridad</td>
+            <td>Respaldo diario de la base de datos en producción</td>
+            <td><span class="tag tag-warn">Alta</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Dos detalles menores para consultarles</h3>
+    <ul class="simple">
+      <li>
+        <strong>Los formularios de catálogo.</strong> En Servicios, Proveedores, Sectores y
+        Plantillas los asesores ven los formularios de alta aunque el sistema no les deje
+        guardar. Los datos están protegidos, pero reciben un error en lugar de no ver el botón.
+        Hay que decidir si se ocultan.
+      </li>
+      <li>
+        <strong>La etiqueta «Autónomos».</strong> Se dedujo del CIF, que solo dice si es persona
+        física. Si entre esos 384 hay particulares que solo hacen la renta y no son autónomos,
+        recibirían circulares de cotización que no les tocan. Conviene preguntar si ese caso existe.
+      </li>
+    </ul>
+  </section>
+
+  <p class="pie">
+    Documento preparado a partir del código, del informe de calidad y del estado real de la
+    base de datos. Los estados reflejan la situación en el momento de escribirlo.
+  </p>
+
+</div>

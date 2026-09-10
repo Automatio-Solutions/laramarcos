@@ -1,5 +1,5 @@
 import "server-only";
-import { MODELO_CLAUDE } from "@/lib/ia/claude";
+import { MODELO_RAPIDO } from "@/lib/ia/claude";
 import {
   clasificarPorSector, esUrgente, resumenAccionable,
   type PublicacionRaw, type SectorRef,
@@ -45,7 +45,7 @@ export async function clasificarLote(
     const idsValidos = new Set(sectores.map((s) => s.id));
 
     const msg = await client.messages.create({
-      model: MODELO_CLAUDE,
+      model: MODELO_RAPIDO,
       max_tokens: 8192,
       system:
         "Eres un asesor de una gestoría en Extremadura. Clasificas publicaciones del DOE y del BOE " +

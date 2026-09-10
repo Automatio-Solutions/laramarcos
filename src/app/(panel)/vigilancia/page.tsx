@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { procesarEjemploAction } from "./actions";
+import { procesarEjemploAction, enviarNewsletterAction } from "./actions";
 
 interface PubRow { id: string; boletin: string; titulo: string; urgente: boolean; enlace: string | null; sector: { nombre: string } | null; }
 interface NewsRow { id: string; asunto: string; contenido: string; destinatarios: number; enviada: boolean; sector: { nombre: string } | null; }
@@ -20,7 +20,7 @@ export default async function VigilanciaPage() {
         <div>
           <h1 className="text-2xl font-bold text-primary">Vigilancia DOE/BOE</h1>
           <p className="text-sm text-fg-muted">
-            El agente lee DOE+BOE cada madrugada (vía n8n → POST /api/cron/doe-boe), clasifica por sector y avisa solo a los clientes afectados.
+            La propia plataforma descarga el DOE y el BOE cada mañana, los clasifica por sector con IA y avisa solo a los clientes afectados.
           </p>
         </div>
         <form action={procesarEjemploAction}>
@@ -52,9 +52,20 @@ export default async function VigilanciaPage() {
             {newsletters.length === 0 && <li className="rounded-lg border border-border bg-surface px-4 py-6 text-center text-fg-muted">Sin novedades → no se envía nada.</li>}
             {newsletters.map((n) => (
               <li key={n.id} className="rounded-lg border border-border bg-surface p-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-3">
                   <p className="font-medium text-fg">{n.sector?.nombre ?? "—"}</p>
-                  <span className="text-xs text-fg-muted">{n.destinatarios} destinatarios · {n.enviada ? "enviada" : "pendiente envío (Resend)"}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-fg-muted">
+                      {n.destinatarios} destinatarios · {n.enviada ? "enviada" : "pendiente de envío"}
+                    </span>
+                    {!n.enviada && (
+                      <form action={enviarNewsletterAction.bind(null, n.id)}>
+                        <button className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-white hover:bg-[var(--color-primary-hover)]">
+                          Enviar ahora
+                        </button>
+                      </form>
+                    )}
+                  </div>
                 </div>
                 <p className="mt-1 whitespace-pre-line text-xs text-fg-muted">{n.contenido}</p>
               </li>
@@ -62,7 +73,7 @@ export default async function VigilanciaPage() {
           </ul>
         </div>
       </section>
-      <p className="text-xs text-fg-muted">El envío real por Resend y la clasificación con Claude se activan con sus API keys. Las tareas urgentes se crean en Tareas (origen DOE/BOE).</p>
+      <p className="text-xs text-fg-muted">Las circulares salen por Resend desde circulares@laramarcosasesores.es, con los clientes en copia oculta. Las tareas urgentes se crean en Tareas (origen DOE/BOE).</p>
     </div>
   );
 }

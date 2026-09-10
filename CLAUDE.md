@@ -12,7 +12,7 @@ improductivas, garantizar que ninguna gestión quede sin cobrar y posicionar al 
 |----|--------|-------------|
 | M1 | Gestión de tareas + Clientes | Kanban/Lista/Calendario, subtareas asignables, dependencias, @menciones, vinculación a facturación. Apartado Clientes (ficha 360, segmentación). |
 | M2 | Presupuestación con IA | Texto libre → Claude consulta catálogo en BBDD → editor libre → envío Resend → agente lector de aceptaciones → crea tarea + subtareas. |
-| M3 | Vigilancia DOE/BOE | Agente diario lee DOE+BOE, clasifica por sector, newsletters segmentadas vía Resend, crea tareas urgentes en M1. |
+| M3 | Vigilancia DOE/BOE | La app descarga DOE+BOE cada mañana, clasifica por sector con IA, newsletters segmentadas vía Resend, crea tareas urgentes en M1. |
 | M4 | Precontabilización OCR | Facturas (PDF/escaneadas) → OCR + Claude → Excel modelo Aplifisa. Memoria de proveedores, semáforo de confianza. Datos en VPS propio. |
 | M5 | Base de datos centralizada | PostgreSQL/Supabase, núcleo: clientes, servicios, proveedores, sectores, plantillas de subtareas, históricos. Una sola fuente de verdad. |
 
@@ -24,7 +24,7 @@ improductivas, garantizar que ninguna gestión quede sin cobrar y posicionar al 
 | Backend ligero | Next.js API routes / server actions (webhooks Resend, llamadas Claude, triggers OCR, cron DOE/BOE) |
 | Base de datos | PostgreSQL gestionada vía **Supabase** (RLS por rol) |
 | Email transaccional | **Resend** (dominio propio: presupuestos@laramarcos.es) |
-| Automatización pesada | **n8n** (cola OCR, descarga/proceso DOE-BOE) |
+| Automatización | **Vercel Cron** — un único despachador diario (`/api/cron/diario`). Sin n8n: todo vive en la app |
 | IA | **Claude (Anthropic)** — presupuestos, OCR semántico, clasificación DOE/BOE, agente lector |
 | OCR / datos sensibles | **VPS propio** del despacho (carpetas por cliente) |
 | Integración contable | Excel modelo **Aplifisa** (export/import) · Google Drive (adjuntos) |
@@ -33,7 +33,8 @@ improductivas, garantizar que ninguna gestión quede sin cobrar y posicionar al 
 
 Next.js App Router. Server Components + TanStack Query en cliente. Server actions / route handlers
 para la capa de servidor (webhooks, agentes IA, cron). Supabase como capa de datos con RLS por rol de
-usuario. n8n para flujos asíncronos pesados (cola OCR, scraping DOE/BOE). Ver patrones en
+usuario. Los procesos diarios (DOE/BOE, alertas, resumen, recurrentes) los ejecuta la propia app
+vía Vercel Cron. Ver patrones en
 `specbox-engine/architecture/react/`.
 
 ## Memoria Persistente (Engram) — REQUERIDO
@@ -98,8 +99,13 @@ Reglas: Stitch genera en LIGHT (dark mode en código con tokens CSS); cada panta
 ### Resend
 - Dominio: presupuestos@laramarcos.es (verificar SPF/DKIM). Plan Pro estimado.
 
-### n8n
-- Cola de procesamiento OCR (M4) y descarga/proceso DOE-BOE (M3).
+### Vercel Cron (sustituye a n8n)
+- Plan **hobby**: máximo 2 cron jobs y una ejecución diaria → un solo despachador
+  `/api/cron/diario` (06:00 UTC) que ejecuta las 4 tareas en secuencia, las baratas primero.
+- Límite de 60 s por función: el lote de boletines se acota a 60 publicaciones y la
+  clasificación usa Haiku (`MODELO_RAPIDO`), no Opus.
+- Fuentes: BOE por API de datos abiertos, DOE por RSS de sus 6 secciones (iso-8859-1).
+- Autenticación: `CRON_SECRET` aceptado como `Authorization: Bearer` (Vercel) o `x-cron-secret` (manual).
 
 ### Google Stitch (UI)
 - Project ID: TBD · Device: DESKTOP · Model: GEMINI_3_PRO · Diseños en `doc/design/{feature}/`

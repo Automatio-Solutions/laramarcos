@@ -38,10 +38,17 @@ async function purgar() {
   const { data: ts } = await admin.from("tareas").select("id").ilike("titulo", `%${TAG}%`);
   const ids = (ts ?? []).map((t) => t.id);
   if (ids.length) {
+    // lineas_factura ANTES que tareas: la FK es "on delete set null", así que
+    // si se borra la tarea primero, la línea sobrevive huérfana y se queda
+    // para siempre en la pantalla de Facturación pendiente.
+    await admin.from("lineas_factura").delete().in("tarea_id", ids);
     for (const tb of ["dependencias_tarea", "comentarios", "tiempos", "subtareas", "adjuntos"]) await admin.from(tb).delete().in("tarea_id", ids);
     await admin.from("dependencias_tarea").delete().in("depende_de_id", ids);
     await admin.from("tareas").delete().in("id", ids);
   }
+  // Red de seguridad: barre también las que ya quedaron huérfanas de
+  // ejecuciones anteriores, que no tienen tarea a la que apuntar.
+  await admin.from("lineas_factura").delete().ilike("concepto", `%${TAG}%`);
   const { data: cs } = await admin.from("clientes").select("id").ilike("razon_social", `%${TAG}%`);
   const cids = (cs ?? []).map((c) => c.id);
   if (cids.length) {

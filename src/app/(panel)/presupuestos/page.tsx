@@ -1,5 +1,8 @@
 import Link from "next/link";
 import { listPresupuestos } from "@/lib/repos/presupuestos";
+import { BotonEliminar } from "@/components/BotonEliminar";
+import { eliminarPresupuestoAction } from "./actions";
+import { createClient } from "@/lib/supabase/server";
 
 const eur = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" });
 const ESTADO_COLOR: Record<string, string> = {
@@ -13,6 +16,15 @@ const ESTADO_COLOR: Record<string, string> = {
 export default async function PresupuestosPage() {
   const presupuestos = await listPresupuestos();
   const aceptados = presupuestos.filter((p) => p.estado === "aceptado").length;
+
+  // La RLS solo deja borrar a responsables y admin. Se oculta la X al resto en
+  // vez de enseñar un botón que les daría siempre "no tienes permiso".
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data: me } = user
+    ? await supabase.from("usuarios").select("rol").eq("id", user.id).maybeSingle()
+    : { data: null };
+  const puedeEliminar = me?.rol === "responsable" || me?.rol === "admin";
 
   return (
     <div className="space-y-6 p-8">
@@ -39,18 +51,51 @@ export default async function PresupuestosPage() {
               <th className="px-4 py-3 font-medium text-right">Total</th>
               <th className="px-4 py-3 font-medium">Estado</th>
               <th className="px-4 py-3 font-medium">Fecha</th>
+              {puedeEliminar && <th className="px-2 py-3"><span className="sr-only">Acciones</span></th>}
             </tr>
           </thead>
           <tbody>
-            {presupuestos.length === 0 && <tr><td colSpan={4} className="px-4 py-10 text-center text-fg-muted">No hay presupuestos. Crea el primero desde texto libre.</td></tr>}
-            {presupuestos.map((p) => (
-              <tr key={p.id} className="border-t border-border hover:bg-surface-raised">
-                <td className="px-4 py-3"><Link href={`/presupuestos/${p.id}`} className="font-medium text-fg hover:text-accent">{p.cliente_nombre ?? "(sin cliente)"}</Link></td>
-                <td className="px-4 py-3 text-right font-mono text-fg">{eur.format(p.total)}</td>
-                <td className="px-4 py-3"><span className={`rounded-md px-2 py-0.5 text-xs font-medium capitalize ${ESTADO_COLOR[p.estado]}`}>{p.estado}</span></td>
-                <td className="px-4 py-3 text-fg-muted">{new Date(p.created_at).toLocaleDateString("es-ES")}</td>
-              </tr>
-            ))}
+            {presupuestos.length === 0 && <tr><td colSpan={puedeEliminar ? 5 : 4} className="px-4 py-10 text-center text-fg-muted">No hay presupuestos. Crea el primero desde texto libre.</td></tr>}
+            {presupuestos.map((p) => {
+              const cliente = p.cliente_nombre ?? "(sin cliente)";
+              // Cada celda lleva su propio enlace a pantalla completa: así se
+              // abre el presupuesto pinchando en cualquier punto de la fila,
+              // sin perder el enlace real (abrir en pestaña nueva, teclado).
+              const celda = "block px-4 py-3";
+              return (
+                <tr key={p.id} className="border-t border-border hover:bg-surface-raised">
+                  <td className="p-0">
+                    <Link href={`/presupuestos/${p.id}`} className={`${celda} font-medium text-fg`}>{cliente}</Link>
+                  </td>
+                  <td className="p-0">
+                    <Link href={`/presupuestos/${p.id}`} className={`${celda} text-right font-mono text-fg`}>{eur.format(p.total)}</Link>
+                  </td>
+                  <td className="p-0">
+                    <Link href={`/presupuestos/${p.id}`} className={celda}>
+                      <span className={`rounded-md px-2 py-0.5 text-xs font-medium capitalize ${ESTADO_COLOR[p.estado]}`}>{p.estado}</span>
+                    </Link>
+                  </td>
+                  <td className="p-0">
+                    <Link href={`/presupuestos/${p.id}`} className={`${celda} text-fg-muted`}>{new Date(p.created_at).toLocaleDateString("es-ES")}</Link>
+                  </td>
+                  {puedeEliminar && (
+                    <td className="px-2 py-3 text-right align-middle">
+                      <BotonEliminar
+                        id={p.id}
+                        descripcion={`el presupuesto de ${cliente}`}
+                        titulo="Eliminar presupuesto"
+                        mensaje={
+                          p.estado === "aceptado"
+                            ? `El presupuesto de ${cliente} está ACEPTADO y tiene una tarea asociada, que no se borrará. Perderás el registro de lo que se presupuestó y se aceptó. ¿Seguro?`
+                            : `Se eliminará el presupuesto de ${cliente}. Esta acción no se puede deshacer.`
+                        }
+                        onEliminar={eliminarPresupuestoAction}
+                      />
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

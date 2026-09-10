@@ -9,14 +9,42 @@ function norm(s: string): string {
   return (s ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 }
 
-// Sinónimos por sector (clave = nombre del sector normalizado)
+// Sinónimos por sector (clave = nombre del sector normalizado, tal y como está
+// dado de alta en la tabla `sectores`: ver scripts/cargar-sectores.mjs).
 const SINONIMOS: Record<string, string[]> = {
-  hosteleria: ["bar", "restaurante", "turismo", "hotel", "hospedaje"],
-  construccion: ["obra", "edificacion", "reforma", "urbanismo"],
-  agricultura: ["agrario", "ganaderia", "campo", "cultivo", "agroalimentari"],
-  comercio: ["tienda", "minorista", "retail", "comerciante"],
-  transporte: ["logistica", "mercancias", "vehiculo", "carretera"],
-  salud: ["sanitari", "clinica", "farmacia", "asistencial"],
+  "agricultura y ganaderia": [
+    "agrario", "agricola", "ganaderia", "campo", "cultivo", "agroalimentari",
+    "pac ", "olivar", "dehesa", "sanidad vegetal", "fitosanitari", "regadio",
+    "sequia", "explotacion agraria",
+  ],
+  "hosteleria y turismo": [
+    "bar", "restaurante", "turismo", "hotel", "hospedaje", "terraza",
+    "alojamiento", "vivienda turistica",
+  ],
+  "construccion y reformas": [
+    "obra", "edificacion", "reforma", "urbanismo", "licencia de obra",
+    "rehabilitacion", "construccion",
+  ],
+  comercio: ["tienda", "minorista", "retail", "comerciante", "horario comercial", "etiquetado"],
+  transporte: ["logistica", "mercancias", "vehiculo", "carretera", "tacografo", "transportista"],
+  "salud y bienestar": ["sanitari", "clinica", "farmacia", "asistencial", "veterinari"],
+  "industria y agroalimentario": [
+    "industria", "fabrica", "envasado", "registro sanitario", "denominacion de origen",
+    "manufactur",
+  ],
+  "servicios profesionales": ["colegio profesional", "consultoria", "asesoria", "profesional"],
+  "inmobiliario y patrimonial": [
+    "alquiler", "arrendamiento", "vivienda", "ibi", "plusvalia", "catastro", "inmobiliari",
+  ],
+  // Transversales: normativa que afecta por forma jurídica, no por actividad.
+  "autonomos (reta)": [
+    "autonomo", "reta", "cotizacion", "estimacion objetiva", "modulos",
+    "trabajador por cuenta propia", "irpf",
+  ],
+  sociedades: [
+    "impuesto sobre sociedades", "impuesto de sociedades", "mercantil",
+    "cuentas anuales", "registro mercantil", "sociedad limitada",
+  ],
 };
 
 const PALABRAS_URGENTES = ["plazo", "obligaci", "obligatori", "ayuda", "subvenci", "convocatoria", "requerimiento", "vencimiento"];
@@ -43,4 +71,36 @@ export function resumenAccionable(pub: PublicacionRaw): string {
   if (esUrgente(pub)) partes.push("Acción requerida: revisa el plazo o la obligación indicada.");
   if (pub.enlace) partes.push(`Texto oficial: ${pub.enlace}`);
   return partes.join(" ");
+}
+
+/**
+ * Por encima de este tamaño, un sector deja de generar una tarea por cliente.
+ *
+ * El reparto por cliente es lo útil en un sector pequeño ("avisa a estos 8
+ * agricultores, que se les acaba el plazo"). En uno grande es demoledor: los
+ * transversales tienen 384 y 210 clientes, así que una sola publicación
+ * urgente llenaría el tablero de cientos de tareas idénticas.
+ */
+export const UMBRAL_TAREA_UNICA = 30;
+
+/**
+ * Tope de tareas por ejecución. Red de seguridad para el caso patológico de
+ * muchas publicaciones urgentes en sectores medianos el mismo día: a partir
+ * de aquí todo pasa a tarea única.
+ */
+export const MAX_TAREAS_POR_EJECUCION = 100;
+
+export type ModoTarea = "ninguna" | "por-cliente" | "unica";
+
+/**
+ * Decide cómo materializar el aviso de una publicación urgente.
+ *
+ * La tarea única no lleva responsable: quién se ocupa lo decide el
+ * responsable del despacho desde el panel, nunca el agente.
+ */
+export function modoTareaUrgente(clientesEnSector: number, tareasYaCreadas = 0): ModoTarea {
+  if (clientesEnSector <= 0) return "ninguna";
+  if (clientesEnSector > UMBRAL_TAREA_UNICA) return "unica";
+  if (tareasYaCreadas + clientesEnSector > MAX_TAREAS_POR_EJECUCION) return "unica";
+  return "por-cliente";
 }

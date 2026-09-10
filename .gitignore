@@ -53,3 +53,6 @@ Thumbs.db
 doc/Envio Asesoria/
 doc/clientes/
 *.xlsx
+.vercel
+.env*
+!.env.example
