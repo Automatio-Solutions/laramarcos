@@ -20,7 +20,7 @@ export default async function VigilanciaPage() {
         <div>
           <h1 className="text-2xl font-bold text-primary">Vigilancia DOE/BOE</h1>
           <p className="text-sm text-fg-muted">
-            El agente lee DOE+BOE cada madrugada (vía n8n → POST /api/cron/doe-boe), clasifica por sector y avisa solo a los clientes afectados.
+            La propia plataforma descarga el DOE y el BOE cada mañana, los clasifica por sector con IA y avisa solo a los clientes afectados.
           </p>
         </div>
         <form action={procesarEjemploAction}>

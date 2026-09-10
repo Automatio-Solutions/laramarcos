@@ -6,7 +6,7 @@ import { procesarBoletines } from "@/lib/vigilancia/procesar";
 import { enviarEmail, hayResend, trocear, REMITENTE_CIRCULARES } from "@/lib/email/cliente";
 import { emailCircular } from "@/lib/email/plantillas";
 
-// Demo/manual: procesa unos items de ejemplo para ver el pipeline (en prod lo hace n8n).
+// Demo/manual: procesa unos items de ejemplo para ver el pipeline sin esperar al cron.
 export async function procesarEjemploAction() {
   const admin = createAdminClient();
   const fecha = new Date().toISOString().slice(0, 10);

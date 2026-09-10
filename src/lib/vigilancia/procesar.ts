@@ -1,14 +1,12 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { clasificarLote } from "./clasificar-ia";
+import type { ItemBoletin } from "./parsear";
 import type { SectorRef } from "./clasificar";
 
-export interface ItemBoletin {
-  boletin: string; // DOE | BOE
-  titulo: string;
-  resumen?: string;
-  enlace?: string;
-}
+// La definición vive en ./parsear.ts (módulo puro); se reexporta para no
+// romper los imports existentes.
+export type { ItemBoletin } from "./parsear";
 
 export interface ResultadoProceso {
   publicaciones_nuevas: number;
