@@ -22,7 +22,7 @@ const NAV = [
 export function PanelNav({ esStaff = false }: { esStaff?: boolean }) {
   const pathname = usePathname();
   return (
-    <nav className="flex-1 space-y-1 p-3">
+    <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
       {NAV.filter((item) => !item.staff || esStaff).map((item) => {
         const active = pathname.startsWith(item.href);
         return (
