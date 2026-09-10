@@ -9,14 +9,42 @@ function norm(s: string): string {
   return (s ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 }
 
-// Sinónimos por sector (clave = nombre del sector normalizado)
+// Sinónimos por sector (clave = nombre del sector normalizado, tal y como está
+// dado de alta en la tabla `sectores`: ver scripts/cargar-sectores.mjs).
 const SINONIMOS: Record<string, string[]> = {
-  hosteleria: ["bar", "restaurante", "turismo", "hotel", "hospedaje"],
-  construccion: ["obra", "edificacion", "reforma", "urbanismo"],
-  agricultura: ["agrario", "ganaderia", "campo", "cultivo", "agroalimentari"],
-  comercio: ["tienda", "minorista", "retail", "comerciante"],
-  transporte: ["logistica", "mercancias", "vehiculo", "carretera"],
-  salud: ["sanitari", "clinica", "farmacia", "asistencial"],
+  "agricultura y ganaderia": [
+    "agrario", "agricola", "ganaderia", "campo", "cultivo", "agroalimentari",
+    "pac ", "olivar", "dehesa", "sanidad vegetal", "fitosanitari", "regadio",
+    "sequia", "explotacion agraria",
+  ],
+  "hosteleria y turismo": [
+    "bar", "restaurante", "turismo", "hotel", "hospedaje", "terraza",
+    "alojamiento", "vivienda turistica",
+  ],
+  "construccion y reformas": [
+    "obra", "edificacion", "reforma", "urbanismo", "licencia de obra",
+    "rehabilitacion", "construccion",
+  ],
+  comercio: ["tienda", "minorista", "retail", "comerciante", "horario comercial", "etiquetado"],
+  transporte: ["logistica", "mercancias", "vehiculo", "carretera", "tacografo", "transportista"],
+  "salud y bienestar": ["sanitari", "clinica", "farmacia", "asistencial", "veterinari"],
+  "industria y agroalimentario": [
+    "industria", "fabrica", "envasado", "registro sanitario", "denominacion de origen",
+    "manufactur",
+  ],
+  "servicios profesionales": ["colegio profesional", "consultoria", "asesoria", "profesional"],
+  "inmobiliario y patrimonial": [
+    "alquiler", "arrendamiento", "vivienda", "ibi", "plusvalia", "catastro", "inmobiliari",
+  ],
+  // Transversales: normativa que afecta por forma jurídica, no por actividad.
+  "autonomos (reta)": [
+    "autonomo", "reta", "cotizacion", "estimacion objetiva", "modulos",
+    "trabajador por cuenta propia", "irpf",
+  ],
+  sociedades: [
+    "impuesto sobre sociedades", "impuesto de sociedades", "mercantil",
+    "cuentas anuales", "registro mercantil", "sociedad limitada",
+  ],
 };
 
 const PALABRAS_URGENTES = ["plazo", "obligaci", "obligatori", "ayuda", "subvenci", "convocatoria", "requerimiento", "vencimiento"];

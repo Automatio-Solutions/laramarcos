@@ -2,10 +2,17 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { clasificarPorSector, esUrgente, resumenAccionable } from "../../src/lib/vigilancia/clasificar.ts";
 
+// Los nombres son los que carga scripts/cargar-sectores.mjs en la tabla
+// `sectores`: los sinónimos del clasificador se indexan por ellos.
 const sectores = [
-  { id: "sec-host", nombre: "Hostelería" },
-  { id: "sec-const", nombre: "Construcción" },
-  { id: "sec-agri", nombre: "Agricultura" },
+  { id: "sec-host", nombre: "Hostelería y turismo" },
+  { id: "sec-const", nombre: "Construcción y reformas" },
+  { id: "sec-agri", nombre: "Agricultura y ganadería" },
+];
+
+const transversales = [
+  { id: "sec-auto", nombre: "Autónomos (RETA)" },
+  { id: "sec-soc", nombre: "Sociedades" },
 ];
 
 test("clasificarPorSector: por nombre y por sinónimo", () => {
@@ -13,6 +20,19 @@ test("clasificarPorSector: por nombre y por sinónimo", () => {
   assert.equal(clasificarPorSector({ titulo: "Nueva normativa de edificación y obra" }, sectores), "sec-const");
   assert.equal(clasificarPorSector({ titulo: "Subvenciones al sector agrario y ganadería" }, sectores), "sec-agri");
   assert.equal(clasificarPorSector({ titulo: "Algo sin relación con ningún sector" }, sectores), null);
+});
+
+test("clasificarPorSector: sectores transversales por forma jurídica", () => {
+  // La mayoría de la cartera son autónomos: la normativa de RETA es la que
+  // más lectores tiene, y no depende de la actividad del cliente.
+  assert.equal(
+    clasificarPorSector({ titulo: "Nuevas bases de cotización para el trabajador por cuenta propia" }, transversales),
+    "sec-auto",
+  );
+  assert.equal(
+    clasificarPorSector({ titulo: "Se aprueba el modelo del impuesto sobre sociedades" }, transversales),
+    "sec-soc",
+  );
 });
 
 test("esUrgente: detecta plazos/ayudas/obligaciones", () => {
