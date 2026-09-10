@@ -27,19 +27,28 @@ try {
   await q(`insert into public.usuarios (id,email,nombre,rol) values ($1,'a@test.lm','Asesor',$2)`, [asesor, "asesor"]);
   await q(`insert into public.sectores (id,nombre) values ($1,$2)`, [sectorId, "Test-" + cif]);
 
-  // AC-05: alta con datos fiscales + asesor + sector
+  // AC-05: alta con datos fiscales + asesor + oficina + sector
+  // (desde la migración 0013 el IBAN vive en cliente_cuentas, no en clientes)
   const ins = await q(
-    `insert into public.clientes (cif, razon_social, direccion, email, iban, condiciones_pago, asesor_id)
-     values ($1,'Cliente Test','C/ Mayor 1','c@test.lm','ES9121000418450200051332','30 días', $2) returning id`,
+    `insert into public.clientes (cif, razon_social, direccion, email, oficina, asesor_id)
+     values ($1,'Cliente Test','C/ Mayor 1','c@test.lm','Badajoz', $2) returning id`,
     [cif, asesor],
   );
   const clienteId = ins.rows[0].id;
   await q(`insert into public.cliente_sectores (cliente_id, sector_id) values ($1,$2)`, [clienteId, sectorId]);
 
-  const row = await q(`select cif, razon_social, iban, asesor_id from public.clientes where id=$1`, [clienteId]);
-  check("AC-05 · alta persiste datos fiscales + asesor", row.rowCount === 1 && row.rows[0].cif === cif && row.rows[0].asesor_id === asesor);
+  // Varias cuentas bancarias por cliente (funcionalidad de cliente_cuentas)
+  await q(`insert into public.cliente_cuentas (cliente_id, iban, descripcion) values
+           ($1,'ES9121000418450200051332','Cuenta principal'),
+           ($1,'ES7100302053091234567895','Cuenta de nóminas')`, [clienteId]);
+
+  const row = await q(`select cif, razon_social, asesor_id, oficina from public.clientes where id=$1`, [clienteId]);
+  check("AC-05 · alta persiste datos fiscales + asesor + oficina",
+    row.rowCount === 1 && row.rows[0].cif === cif && row.rows[0].asesor_id === asesor && row.rows[0].oficina === "Badajoz");
   const rel = await q(`select 1 from public.cliente_sectores where cliente_id=$1 and sector_id=$2`, [clienteId, sectorId]);
   check("AC-05 · asociación de sector (N:M)", rel.rowCount === 1);
+  const cuentas = await q(`select count(*)::int n from public.cliente_cuentas where cliente_id=$1`, [clienteId]);
+  check("AC-05 · varias cuentas bancarias por cliente", cuentas.rows[0].n === 2);
 
   // AC-08: CIF duplicado → unique violation (23505)
   let dupCode = null;
