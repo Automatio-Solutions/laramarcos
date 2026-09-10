@@ -16,8 +16,15 @@ const ESTADO_COLOR: Record<string, string> = {
   rechazado: "bg-error/10 text-error",
 };
 
-export default async function PresupuestoPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function PresupuestoPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ aviso?: string }>;
+}) {
   const { id } = await params;
+  const { aviso } = await searchParams;
   const p = await getPresupuesto(id);
   if (!p) notFound();
   const bloqueado = p.estado === "aceptado" || p.estado === "rechazado";
@@ -37,6 +44,10 @@ export default async function PresupuestoPage({ params }: { params: Promise<{ id
           <span className={`rounded-md px-3 py-1 text-sm font-medium capitalize ${ESTADO_COLOR[p.estado]}`}>{p.estado}</span>
         </div>
       </header>
+
+      {aviso && (
+        <p className="rounded-md border border-border bg-surface-raised px-3 py-2 text-sm text-fg">{aviso}</p>
+      )}
 
       {p.estado === "aceptado" && p.tarea_id && (
         <p className="rounded-md bg-success/10 px-3 py-2 text-sm text-success">
