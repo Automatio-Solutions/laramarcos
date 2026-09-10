@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { clasificarLote } from "./clasificar-ia";
 import type { ItemBoletin } from "./parsear";
+import { modoTareaUrgente } from "./clasificar";
 import type { SectorRef } from "./clasificar";
 
 // La definición vive en ./parsear.ts (módulo puro); se reexporta para no
@@ -72,6 +73,34 @@ export async function procesarBoletines(
   let tareas = 0;
   for (const p of nuevas) {
     if (!p.urgente || !p.sector_id) continue;
+
+    const { count } = await admin
+      .from("cliente_sectores")
+      .select("cliente_id", { count: "exact", head: true })
+      .eq("sector_id", p.sector_id);
+    const nClientes = count ?? 0;
+    const modo = modoTareaUrgente(nClientes, tareas);
+    if (modo === "ninguna") continue;
+
+    const nombreSector = sectores.find((s) => s.id === p.sector_id)?.nombre ?? "el sector";
+
+    // Sector grande (los transversales rondan los 400 clientes): una sola
+    // tarea para el despacho. Sin responsable: a quién le toca lo decide el
+    // responsable desde el panel, nunca el agente.
+    if (modo === "unica") {
+      await admin.from("tareas").insert({
+        titulo: `[Urgente DOE/BOE] ${p.titulo}`,
+        descripcion: `Afecta a ${nClientes} clientes de «${nombreSector}». Revisar y decidir a quién se avisa.${p.enlace ? `\n\n${p.enlace}` : ""}`,
+        cliente_id: null,
+        responsable_id: null,
+        origen: "doe_boe",
+        categoria: "Normativa",
+      });
+      tareas++;
+      continue;
+    }
+
+    // Sector pequeño: una tarea por cliente, con su asesor de siempre.
     const { data: rels } = await admin
       .from("cliente_sectores")
       .select("cliente:clientes(id, asesor_id)")

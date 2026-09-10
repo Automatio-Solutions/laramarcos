@@ -72,3 +72,35 @@ export function resumenAccionable(pub: PublicacionRaw): string {
   if (pub.enlace) partes.push(`Texto oficial: ${pub.enlace}`);
   return partes.join(" ");
 }
+
+/**
+ * Por encima de este tamaño, un sector deja de generar una tarea por cliente.
+ *
+ * El reparto por cliente es lo útil en un sector pequeño ("avisa a estos 8
+ * agricultores, que se les acaba el plazo"). En uno grande es demoledor: los
+ * transversales tienen 384 y 210 clientes, así que una sola publicación
+ * urgente llenaría el tablero de cientos de tareas idénticas.
+ */
+export const UMBRAL_TAREA_UNICA = 30;
+
+/**
+ * Tope de tareas por ejecución. Red de seguridad para el caso patológico de
+ * muchas publicaciones urgentes en sectores medianos el mismo día: a partir
+ * de aquí todo pasa a tarea única.
+ */
+export const MAX_TAREAS_POR_EJECUCION = 100;
+
+export type ModoTarea = "ninguna" | "por-cliente" | "unica";
+
+/**
+ * Decide cómo materializar el aviso de una publicación urgente.
+ *
+ * La tarea única no lleva responsable: quién se ocupa lo decide el
+ * responsable del despacho desde el panel, nunca el agente.
+ */
+export function modoTareaUrgente(clientesEnSector: number, tareasYaCreadas = 0): ModoTarea {
+  if (clientesEnSector <= 0) return "ninguna";
+  if (clientesEnSector > UMBRAL_TAREA_UNICA) return "unica";
+  if (tareasYaCreadas + clientesEnSector > MAX_TAREAS_POR_EJECUCION) return "unica";
+  return "por-cliente";
+}

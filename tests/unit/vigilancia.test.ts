@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clasificarPorSector, esUrgente, resumenAccionable } from "../../src/lib/vigilancia/clasificar.ts";
+import {
+  clasificarPorSector, esUrgente, resumenAccionable,
+  modoTareaUrgente, UMBRAL_TAREA_UNICA, MAX_TAREAS_POR_EJECUCION,
+} from "../../src/lib/vigilancia/clasificar.ts";
 
 // Los nombres son los que carga scripts/cargar-sectores.mjs en la tabla
 // `sectores`: los sinónimos del clasificador se indexan por ellos.
@@ -45,4 +48,28 @@ test("resumenAccionable incluye aviso si es urgente y el enlace", () => {
   const r = resumenAccionable({ titulo: "Ayuda hostelería", enlace: "https://doe.es/x" });
   assert.ok(r.includes("Acción requerida"));
   assert.ok(r.includes("https://doe.es/x"));
+});
+
+// --- Tareas urgentes: evitar inundar el tablero (UC-305) ---
+
+test("modoTareaUrgente: sector pequeño reparte por cliente", () => {
+  assert.equal(modoTareaUrgente(8), "por-cliente");
+  assert.equal(modoTareaUrgente(UMBRAL_TAREA_UNICA), "por-cliente");
+});
+
+test("modoTareaUrgente: sector grande genera una sola tarea para el despacho", () => {
+  // Los transversales tienen 384 y 210 clientes: sin esto, una publicación
+  // urgente sobre el RETA crearía 384 tareas idénticas.
+  assert.equal(modoTareaUrgente(UMBRAL_TAREA_UNICA + 1), "unica");
+  assert.equal(modoTareaUrgente(384), "unica");
+});
+
+test("modoTareaUrgente: sin clientes en el sector no se crea nada", () => {
+  assert.equal(modoTareaUrgente(0), "ninguna");
+});
+
+test("modoTareaUrgente: el tope por ejecución corta la acumulación", () => {
+  // Varios sectores medianos el mismo día no pueden sumar cientos de tareas.
+  assert.equal(modoTareaUrgente(25, 0), "por-cliente");
+  assert.equal(modoTareaUrgente(25, MAX_TAREAS_POR_EJECUCION - 10), "unica");
 });
