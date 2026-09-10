@@ -33,9 +33,15 @@ export default async function TareasPage({ searchParams }: { searchParams: Promi
           <h1 className="text-2xl font-bold text-primary">Tareas</h1>
           <p className="text-sm text-fg-muted">{tareas.length} tareas</p>
         </div>
-        <Link href="/tareas/nuevo" className="rounded-md bg-primary px-4 py-2 font-medium text-white hover:bg-[var(--color-primary-hover)]">
+        {/* Navegación COMPLETA a propósito (no <Link>): el tablero abre las tareas en
+            modal con un interceptor (.)tareas/[id] que capturaría /tareas/nuevo. Una
+            navegación dura evita esa interceptación (no da 404) y, al crear + redirigir,
+            recarga el tablero fresco (si no, la tarea nueva no se vería hasta refrescar).
+            Por eso se desactiva aquí la regla que exige <Link> para rutas internas. */}
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+        <a href="/tareas/nuevo" className="rounded-md bg-primary px-4 py-2 font-medium text-white hover:bg-[var(--color-primary-hover)]">
           + Nueva tarea
-        </Link>
+        </a>
       </header>
 
       {/* Switcher de vista */}
