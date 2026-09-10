@@ -6,8 +6,10 @@
 
 ## Resultado global
 
-**✅ APTO PARA ENTREGA.** Se probó cada punto accesible de la aplicación en 6 capas.
-Se encontraron y **corrigieron 2 bugs reales** y se **modernizaron 2 tests desactualizados**.
+**✅ APTO PARA ENTREGA.** Se probó cada punto accesible de la aplicación en 8 capas
+(incluido navegador real con Playwright, tras detectarse que la prueba por HTTP no
+cubría la navegación de cliente). Se encontraron y **corrigieron 3 bugs reales** y se
+**modernizaron 2 tests desactualizados**.
 No queda ningún fallo abierto salvo lo que está pendiente de construir (depende de
 servicios externos que aporta el cliente: Resend, VPS, Supabase Pro).
 
@@ -20,6 +22,7 @@ servicios externos que aporta el cliente: Resend, VPS, Supabase Pro).
 | 5. Páginas de detalle | Ficha de tarea, editor de presupuesto, PDF, aceptación pública, revisión OCR (con datos reales) | ✅ contenido correcto |
 | 6. Control de acceso | Aislamiento por oficina y por rol (asesor / responsable / admin) | ✅ correcto (tras corregir 2 fugas) |
 | 7. IA en vivo | M2 presupuestos y M3 DOE/BOE contra la API real de Claude | ✅ correcto |
+| 8. Navegador (E2E) | Playwright: login, botones "nuevo", modales de tarea (clic real) | ✅ 8/8 (tras corregir 1 bug) |
 
 ---
 
@@ -36,6 +39,14 @@ servicios externos que aporta el cliente: Resend, VPS, Supabase Pro).
 - **Síntoma**: la página se anunciaba como "solo responsables/admin" pero **no redirigía**; un asesor entraba (aunque la RLS dejaba los datos vacíos) y el enlace aparecía en el menú.
 - **Corrección**: guard de rol con redirección a `/dashboard`, y el enlace se oculta en el menú para no-staff (igual que Archivo y Usuarios).
 - **Verificación**: un asesor es redirigido; un responsable entra con normalidad.
+
+### BUG-03 · El botón "Nueva tarea" daba 404 🔴
+- **Módulo**: M1 · `/tareas`.
+- **Síntoma**: al pulsar "Nueva tarea" desde el tablero saltaba un **404**.
+- **Causa**: `/tareas` abre las tareas en una ventana modal mediante una *ruta interceptora* de Next.js (`(.)tareas/[id]`). Ese interceptor capturaba **cualquier** navegación de cliente a `/tareas/<algo>`, incluida `/tareas/nuevo`, y trataba "nuevo" como el id de una tarea inexistente → 404. El acceso directo por URL (un `GET`) sí funcionaba, porque la interceptación **solo ocurre al pulsar dentro de la app**, no en una carga directa.
+- **Por qué la primera pasada no lo cazó (lección aprendida)**: las capas 1-7 comprobaban las rutas por HTTP (carga directa), donde `/tareas/nuevo` respondía 200. Un bug que solo aparece en la navegación de cliente exige un **navegador real**. Por eso se añadió la **capa 8 (Playwright)** y un test de regresión permanente (`npm run e2e`).
+- **Corrección**: un interceptor específico para `/tareas/nuevo` que abre el formulario de alta **en el mismo modal** (coherente con cómo se abren las tareas). Por URL directa se sigue mostrando la página completa.
+- **Verificación (navegador)**: pulsar "Nueva tarea" abre el formulario, sin 404; abrir una tarea existente muestra su detalle en modal; Esc cierra. Se comprobó además que los botones "nuevo" de Clientes, Servicios y Proveedores no tenían el mismo problema.
 
 ### Tests modernizados (no eran bugs de la app, pero rompían el suite)
 - **`rls-test`**: estaba escrito para el modelo antiguo (visibilidad por `asesor_id`). Reescrito al modelo por **oficina**, añadiendo la comprobación nueva (dos asesores de la misma sede se ven entre sí). 9/9.
