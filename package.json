@@ -3,12 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "description": "Plataforma de gestión LaraMarcos Asesores (5 módulos sobre BBDD central)",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test tests/unit/*.test.ts",
+    "test": "node --import tsx --test tests/unit/*.test.ts",
     "db:apply": "node scripts/db-apply.mjs",
     "db:rls-test": "node scripts/rls-test.mjs",
     "db:clientes-test": "node scripts/clientes-test.mjs",
@@ -28,7 +31,7 @@
     "@anthropic-ai/sdk": "^0.69.0",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.47.10",
-    "next": "16.2.9",
+    "next": "16.3.6",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "resend": "^6.27.0"
@@ -40,11 +43,12 @@
     "@types/react-dom": "^19",
     "dotenv": "^16.4.7",
     "eslint": "^9",
-    "eslint-config-next": "16.2.9",
+    "eslint-config-next": "16.3.6",
     "exceljs": "^4.4.0",
     "pg": "^8.13.1",
     "playwright": "^1.63.0",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }
