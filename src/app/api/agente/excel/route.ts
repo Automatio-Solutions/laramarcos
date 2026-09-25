@@ -1,17 +1,18 @@
 import { type NextRequest } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { trimestreDe } from "@/lib/ocr/core";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { autorizadoAgente, noAutorizado } from "@/lib/agente/auth";
 import { libroAplifisa, XLSX_MIME } from "@/lib/ocr/libro";
 
-// UC-404 AC-07: descarga el Excel modelo Aplifisa de un cliente y un trimestre.
+// El programa del servidor descarga el Excel Aplifisa de un cliente/trimestre y lo
+// deja en la carpeta del cliente. Se regenera entero: refleja las correcciones hechas en la app.
 export async function GET(request: NextRequest) {
+  if (!autorizadoAgente(request)) return noAutorizado();
   const cliente = request.nextUrl.searchParams.get("cliente");
-  const trimestre = request.nextUrl.searchParams.get("trimestre") || trimestreDe(new Date());
-  if (!cliente) return Response.json({ error: "Elige un cliente." }, { status: 400 });
+  const trimestre = request.nextUrl.searchParams.get("trimestre");
+  if (!cliente || !trimestre) return Response.json({ error: "Faltan 'cliente' o 'trimestre'." }, { status: 400 });
 
-  const supabase = await createClient();
   try {
-    const libro = await libroAplifisa(supabase, cliente, trimestre);
+    const libro = await libroAplifisa(createAdminClient(), cliente, trimestre);
     if (!libro) return Response.json({ error: "Cliente no encontrado." }, { status: 404 });
     return new Response(new Uint8Array(libro.buffer), {
       headers: {

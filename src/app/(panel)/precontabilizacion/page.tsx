@@ -1,10 +1,21 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { listClientes } from "@/lib/repos/clientes";
-import { semaforo } from "@/lib/ocr/core";
-import { subirFacturaAction, aprobarFacturaAction } from "./actions";
+import { semaforo, trimestreDe } from "@/lib/ocr/core";
+import { SubidaMasivaFacturas } from "@/components/SubidaMasivaFacturas";
+import { aprobarFacturaAction } from "./actions";
+
+// Las acciones de la subida masiva leen una factura por llamada (10–30 s con Claude).
+export const maxDuration = 60;
 
 const eur = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" });
+/** El trimestre actual y los cinco anteriores ("2026-3T"…). */
+function ultimosTrimestres(n = 6): string[] {
+  const hoy = new Date();
+  return Array.from({ length: n }, (_, i) =>
+    trimestreDe(new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - i * 3, 1))));
+}
+
 const COLOR = { verde: "bg-success/10 text-success", naranja: "bg-warning/10 text-warning", rojo: "bg-error/10 text-error" };
 
 interface FacturaRow {
@@ -29,26 +40,30 @@ export default async function PrecontabilizacionPage() {
       <header className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold text-primary">Precontabilización OCR</h1>
-          <p className="text-sm text-fg-muted">Facturas → Excel modelo Aplifisa. Semáforo de confianza por fila. (Datos en VPS propio en producción.)</p>
+          <p className="text-sm text-fg-muted">Facturas → Excel modelo Aplifisa. Semáforo de confianza por fila.</p>
         </div>
-        <a href="/api/facturas/excel" className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-primary-hover)]">⬇ Excel Aplifisa</a>
       </header>
 
-      {/* Subida */}
-      <form action={subirFacturaAction} className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface p-4 text-sm">
+      {/* Excel Aplifisa por cliente y trimestre: revisadas y verdes; el resto en "Pendientes de revisar" */}
+      <form action="/api/facturas/excel" method="get" className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface p-4 text-sm">
         <label className="space-y-1">
-          <span className="block text-fg-muted">Cliente (carpeta)</span>
-          <select name="cliente_id" className="rounded-md border border-border bg-surface px-2 py-2 text-fg">
-            <option value="">— Sin cliente —</option>
+          <span className="block text-fg-muted">Cliente</span>
+          <select name="cliente" required className="rounded-md border border-border bg-surface px-2 py-2 text-fg">
+            <option value="">— Elige cliente —</option>
             {clientes.map((c) => <option key={c.id} value={c.id}>{c.razon_social}</option>)}
           </select>
         </label>
         <label className="space-y-1">
-          <span className="block text-fg-muted">Factura (PDF/JPG/PNG)</span>
-          <input type="file" name="archivo" accept=".pdf,image/*" required className="text-fg" />
+          <span className="block text-fg-muted">Trimestre</span>
+          <select name="trimestre" className="rounded-md border border-border bg-surface px-2 py-2 text-fg">
+            {ultimosTrimestres().map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
         </label>
-        <button className="rounded-md bg-primary px-4 py-2 font-medium text-white hover:bg-[var(--color-primary-hover)]">Subir y procesar</button>
+        <button className="rounded-md bg-primary px-4 py-2 font-medium text-white hover:bg-[var(--color-primary-hover)]">⬇ Excel Aplifisa</button>
       </form>
+
+      {/* Subida masiva: varios archivos, carpetas o arrastrar */}
+      <SubidaMasivaFacturas clientes={clientes.map((c) => ({ id: c.id, razon_social: c.razon_social }))} />
 
       {/* Métricas / semáforo */}
       <div className="flex gap-3 text-sm">
