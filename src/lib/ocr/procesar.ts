@@ -9,8 +9,9 @@ export interface ResultadoOCR extends FacturaDatos {
 }
 
 const VACIO: FacturaDatos = {
-  fecha: null, proveedor_nombre: null, proveedor_cif: null, concepto: null,
-  base_imponible: null, iva_tipo: null, iva_cuota: null, total: null,
+  fecha: null, numero_factura: null, proveedor_nombre: null, proveedor_cif: null, concepto: null,
+  base_imponible: null, iva_tipo: null, iva_cuota: null,
+  retencion_base: null, retencion_tipo: null, retencion_cuota: null, total: null,
   subcuenta: null, subcuenta_motivo: null, subcuenta_origen: null,
 };
 
@@ -43,6 +44,7 @@ export async function procesarFactura(
           "(600 compras de mercaderías, 621 arrendamientos, 622 reparaciones y conservación, " +
           "623 servicios profesionales, 625 primas de seguros, 626 servicios bancarios, " +
           "628 suministros —luz, agua, teléfono—, 629 otros servicios). " +
+          "Las facturas de profesionales y alquileres suelen llevar retención de IRPF: recógela aparte del IVA. " +
           "Si el dato no aparece en la factura, devuelve null; no lo inventes.",
         tools: [{
           name: "extraer_factura",
@@ -50,7 +52,8 @@ export async function procesarFactura(
           input_schema: {
             type: "object",
             properties: {
-              fecha: { type: ["string", "null"], description: "Fecha de la factura en formato ISO (YYYY-MM-DD)." },
+              fecha: { type: ["string", "null"], description: "Fecha de expedición de la factura en formato ISO (YYYY-MM-DD)." },
+              numero_factura: { type: ["string", "null"], description: "Número o código de la factura, tal cual aparece (con serie si la tiene)." },
               proveedor_nombre: { type: ["string", "null"] },
               proveedor_cif: { type: ["string", "null"] },
               concepto: { type: ["string", "null"], description: "Qué se compró, en pocas palabras." },
@@ -62,7 +65,19 @@ export async function procesarFactura(
                   "'IVA superreducido' → 4; 'IVA general' → 21. Si puedes deducirlo de la cuota y la base, hazlo.",
               },
               iva_cuota: { type: ["number", "null"] },
-              total: { type: ["number", "null"] },
+              retencion_base: {
+                type: ["number", "null"],
+                description: "Base sobre la que se aplica la retención de IRPF. Normalmente la base imponible. null si no hay retención.",
+              },
+              retencion_tipo: {
+                type: ["number", "null"],
+                description: "Tipo de retención de IRPF en % (p. ej. 15, 7, 19). null si la factura no lleva retención.",
+              },
+              retencion_cuota: {
+                type: ["number", "null"],
+                description: "Importe retenido de IRPF, en positivo. null si no hay retención.",
+              },
+              total: { type: ["number", "null"], description: "Total a pagar de la factura (base + IVA − retención)." },
               subcuenta_sugerida: {
                 type: ["string", "null"],
                 description: "AC-02: subcuenta del PGC más probable para este gasto (p. ej. 628). null si no puedes proponer ninguna.",
@@ -88,10 +103,14 @@ export async function procesarFactura(
           subcuenta_motivo?: string | null;
         };
         datos = {
-          fecha: out.fecha ?? null, proveedor_nombre: out.proveedor_nombre ?? null,
+          fecha: out.fecha ?? null, numero_factura: out.numero_factura?.trim() || null,
+          proveedor_nombre: out.proveedor_nombre ?? null,
           proveedor_cif: out.proveedor_cif ?? null, concepto: out.concepto ?? null,
           base_imponible: out.base_imponible ?? null, iva_tipo: out.iva_tipo ?? null,
-          iva_cuota: out.iva_cuota ?? null, total: out.total ?? null,
+          iva_cuota: out.iva_cuota ?? null,
+          retencion_base: out.retencion_base ?? null, retencion_tipo: out.retencion_tipo ?? null,
+          retencion_cuota: out.retencion_cuota != null ? Math.abs(out.retencion_cuota) : null,
+          total: out.total ?? null,
           // AC-02: propuesta de la IA. La pisará el histórico del proveedor si existe.
           subcuenta: out.subcuenta_sugerida?.trim() || null,
           subcuenta_motivo: out.subcuenta_motivo?.trim() || null,

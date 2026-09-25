@@ -2,14 +2,17 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Field } from "@/components/ui/Field";
+import { listClientes } from "@/lib/repos/clientes";
 import { corregirFacturaAction } from "../actions";
 
 interface Factura {
-  id: string; fecha: string | null; proveedor_nombre: string | null; proveedor_cif: string | null;
+  id: string; cliente_id: string | null; fecha: string | null; numero_factura: string | null;
+  proveedor_nombre: string | null; proveedor_cif: string | null;
   concepto: string | null; base_imponible: number | null; iva_tipo: number | null;
-  iva_cuota: number | null; total: number | null; subcuenta: string | null;
+  iva_cuota: number | null; retencion_base: number | null; retencion_tipo: number | null;
+  retencion_cuota: number | null; total: number | null; subcuenta: string | null;
   subcuenta_motivo: string | null; subcuenta_origen: "historico" | "ia" | "manual" | null;
-  confianza: number; archivo_nombre: string | null;
+  confianza: number; archivo_nombre: string | null; ruta_servidor: string | null;
 }
 
 const ORIGEN_LABEL: Record<string, string> = {
@@ -21,7 +24,10 @@ const ORIGEN_LABEL: Record<string, string> = {
 export default async function RevisarFacturaPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
-  const { data } = await supabase.from("facturas_ocr").select("*").eq("id", id).maybeSingle();
+  const [{ data }, clientes] = await Promise.all([
+    supabase.from("facturas_ocr").select("*").eq("id", id).maybeSingle(),
+    listClientes(),
+  ]);
   if (!data) notFound();
   const f = data as Factura;
   const action = corregirFacturaAction.bind(null, id);
@@ -32,12 +38,21 @@ export default async function RevisarFacturaPage({ params }: { params: Promise<{
       <header>
         <Link href="/precontabilizacion" className="text-sm text-fg-muted hover:underline">← Precontabilización</Link>
         <h1 className="mt-1 text-2xl font-bold text-primary">Revisar factura</h1>
-        <p className="text-sm text-fg-muted">{f.archivo_nombre} · confianza {f.confianza}%</p>
+        <p className="text-sm text-fg-muted">{f.ruta_servidor ?? f.archivo_nombre} · confianza {f.confianza}%</p>
       </header>
 
       <form action={action} className="space-y-5">
+        {/* Las facturas del servidor cuya carpeta no se pudo emparejar llegan sin cliente. */}
+        <label className="block space-y-1">
+          <span className="text-sm font-medium text-fg">Cliente</span>
+          <select name="cliente_id" defaultValue={f.cliente_id ?? ""} className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-fg">
+            <option value="">— Sin cliente —</option>
+            {clientes.map((c) => <option key={c.id} value={c.id}>{c.razon_social}</option>)}
+          </select>
+        </label>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Fecha" name="fecha" type="date" defaultValue={f.fecha} />
+          <Field label="Fecha expedición" name="fecha" type="date" defaultValue={f.fecha} />
+          <Field label="Nº factura" name="numero_factura" defaultValue={f.numero_factura} />
           <Field label="Proveedor" name="proveedor_nombre" defaultValue={f.proveedor_nombre} />
           <Field label="CIF proveedor" name="proveedor_cif" defaultValue={f.proveedor_cif} />
           <Field label="Subcuenta" name="subcuenta" defaultValue={f.subcuenta} placeholder="600 / 628 / 410…" />
@@ -59,6 +74,11 @@ export default async function RevisarFacturaPage({ params }: { params: Promise<{
           <Field label="% IVA" name="iva_tipo" defaultValue={v(f.iva_tipo)} />
           <Field label="Cuota IVA" name="iva_cuota" defaultValue={v(f.iva_cuota)} />
           <Field label="Total" name="total" defaultValue={v(f.total)} />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-4">
+          <Field label="Base retención" name="retencion_base" defaultValue={v(f.retencion_base)} />
+          <Field label="% Retención" name="retencion_tipo" defaultValue={v(f.retencion_tipo)} placeholder="15" />
+          <Field label="Cuota retención" name="retencion_cuota" defaultValue={v(f.retencion_cuota)} />
         </div>
 
         <div className="flex gap-3">
