@@ -3,6 +3,7 @@ import type {
   ClienteConRelaciones,
   CuentaCliente,
   Oficina,
+  RegimenContable,
   Sector,
   ServicioContratado,
   Usuario,
@@ -43,6 +44,7 @@ interface ClienteRow {
   asesor_id: string | null;
   oficina: Oficina | null;
   carpeta_url: string | null;
+  regimen_contable: RegimenContable | null;
   fecha_baja: string | null;
   activo: boolean;
   created_at: string;
@@ -87,6 +89,7 @@ function mapCliente(row: ClienteRow): ClienteConRelaciones {
     asesor_id: row.asesor_id,
     oficina: row.oficina,
     carpeta_url: row.carpeta_url,
+    regimen_contable: row.regimen_contable ?? null,
     fecha_baja: row.fecha_baja,
     activo: row.activo,
     created_at: row.created_at,
