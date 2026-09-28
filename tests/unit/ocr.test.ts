@@ -2,19 +2,23 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import ExcelJS from "exceljs";
 import {
-  semaforo, inferirCuotaIva, filaAplifisa, COLUMNAS_APLIFISA, esExportable,
-  trimestreDe, rangoTrimestre, resolverClienteCarpeta, resolverClienteRuta, esCarpetaDePeriodo,
+  semaforo, inferirCuotaIva, filasAplifisa, COLUMNAS_APLIFISA, esExportable,
+  trimestreDe, rangoTrimestre, rangoPeriodo, resolverClienteCarpeta, resolverClienteRuta, esCarpetaDePeriodo,
+  regimenDe, subcuenta8, cuentaSegunRegimen, avisosFactura, confianzaConAvisos,
+  parsearRutaServidor, fechaContablePorCarpeta, fechaDelLibro,
   type FacturaDatos, type ClienteCarpeta,
 } from "../../src/lib/ocr/core.ts";
+import { codigosDe, CONCEPTOS_GASTO, CONCEPTOS_INGRESO } from "../../src/lib/ocr/conceptos.ts";
 import { mimeFactura, esFicheroOculto } from "../../src/lib/ocr/subida.ts";
 import { generarExcelAplifisa, type FacturaExcel } from "../../src/lib/ocr/aplifisa.ts";
 
 const VACIA: FacturaDatos = {
-  fecha: null, numero_factura: null, proveedor_nombre: null, proveedor_cif: null, concepto: null,
-  base_imponible: null, iva_tipo: null, iva_cuota: null,
+  tipo: "gasto", fecha: null, fecha_contable: null, numero_factura: null, proveedor_nombre: null,
+  proveedor_cif: null, concepto: null, base_imponible: null, iva_tipo: null, iva_cuota: null, lineas_iva: [],
   retencion_base: null, retencion_tipo: null, retencion_cuota: null, total: null,
-  subcuenta: null, subcuenta_motivo: null, subcuenta_origen: null,
+  subcuenta: null, subcuenta_tercero: null, sujeto_pasivo: false, subcuenta_motivo: null, subcuenta_origen: null,
 };
+const OFIS = ["Badajoz", "Castuera", "Don Benito", "Orellana"];
 
 test("semaforo: umbrales verde/naranja/rojo", () => {
   assert.equal(semaforo(95), "verde");
@@ -30,58 +34,159 @@ test("inferirCuotaIva: base * tipo", () => {
   assert.equal(inferirCuotaIva(null, 21), null);
 });
 
-test("COLUMNAS_APLIFISA: las 12 del MODELO LIBRO FACTURAS, en su orden", () => {
+test("COLUMNAS_APLIFISA: modelo del despacho + Subcuenta Gasto/Ingreso + Sujeto Pasivo", () => {
   assert.deepEqual([...COLUMNAS_APLIFISA], [
-    "Fecha Expedición *", "Nº Factura *", "Nombre *", "NIF", "Subcuenta", "Base Imponible",
-    "% IVA", "Cuota IVA", "Base Retencion", "% Retencion", "Cuota retencion", "Total Factura",
+    "Fecha Expedición *", "Nº Factura *", "Nombre *", "NIF", "Subcuenta", "Subcuenta Gasto/Ingreso",
+    "Base Imponible", "% IVA", "Cuota IVA", "Base Retencion", "% Retencion", "Cuota retencion",
+    "Total Factura", "Sujeto Pasivo",
   ]);
 });
 
-test("filaAplifisa: orden, fecha como Date, % en tanto por uno, cuota y total inferidos", () => {
-  const fila = filaAplifisa({
+test("filasAplifisa: orden, % como 21 (no 0,21), las dos subcuentas, cuota y total inferidos", () => {
+  const [fila, ...resto] = filasAplifisa({
     ...VACIA, fecha: "2026-03-01", numero_factura: "F-2026/0012", proveedor_nombre: "Endesa",
-    proveedor_cif: "A28023430", base_imponible: 1000, iva_tipo: 21, subcuenta: "628",
+    proveedor_cif: "A28023430", base_imponible: 1000, iva_tipo: 21, subcuenta: "62800000", subcuenta_tercero: "41000023",
   });
+  assert.equal(resto.length, 0);
   assert.equal(fila.length, COLUMNAS_APLIFISA.length);
   assert.deepEqual(fila[0], new Date(Date.UTC(2026, 2, 1)));
   assert.equal(fila[1], "F-2026/0012");
-  assert.equal(fila[2], "Endesa");
-  assert.equal(fila[4], "628");
-  assert.equal(fila[5], 1000);
-  assert.equal(fila[6], 0.21);   // % IVA en tanto por uno
-  assert.equal(fila[7], 210);    // cuota inferida
-  assert.equal(fila[8], "");     // sin retención
-  assert.equal(fila[11], 1210);  // total inferido
+  assert.equal(fila[4], "62800000");   // Subcuenta = gasto
+  assert.equal(fila[5], "41000023");   // Subcuenta Gasto/Ingreso = la del proveedor
+  assert.equal(fila[6], 1000);
+  assert.equal(fila[7], 21);           // % IVA como 21
+  assert.equal(fila[8], 210);
+  assert.equal(fila[9], "");           // sin retención
+  assert.equal(fila[12], 1210);
+  assert.equal(fila[13], "");          // sin sujeto pasivo
 });
 
-test("filaAplifisa: retención de IRPF resta del total", () => {
-  const fila = filaAplifisa({ ...VACIA, base_imponible: 1000, iva_tipo: 21, retencion_tipo: 15 });
-  assert.equal(fila[8], 1000);   // base retención = base imponible
-  assert.equal(fila[9], 0.15);
-  assert.equal(fila[10], 150);
-  assert.equal(fila[11], 1060);  // 1000 + 210 − 150
+test("filasAplifisa: retención de IRPF como 15 y restando del total", () => {
+  const [fila] = filasAplifisa({ ...VACIA, base_imponible: 1000, iva_tipo: 21, retencion_tipo: 15 });
+  assert.equal(fila[9], 1000);
+  assert.equal(fila[10], 15);
+  assert.equal(fila[11], 150);
+  assert.equal(fila[12], 1060);
 });
 
-test("filaAplifisa: el total leído de la factura manda sobre el calculado", () => {
-  const fila = filaAplifisa({ ...VACIA, base_imponible: 1000, iva_tipo: 21, total: 1209.99 });
-  assert.equal(fila[11], 1209.99);
+test("filasAplifisa: una fila por tipo de IVA, retención solo en la primera", () => {
+  const filas = filasAplifisa({
+    ...VACIA, numero_factura: "7", retencion_tipo: 15, retencion_base: 300, total: 406,
+    lineas_iva: [{ base: 100, tipo: 21, cuota: 21 }, { base: 200, tipo: 10, cuota: 20 }],
+  });
+  assert.equal(filas.length, 2);
+  assert.equal(filas[0][1], "7");
+  assert.equal(filas[1][1], "7");      // mismos datos de cabecera
+  assert.equal(filas[0][7], 21);
+  assert.equal(filas[1][7], 10);
+  assert.equal(filas[0][11], 45);      // retención en la primera
+  assert.equal(filas[1][11], "");
+  assert.equal(filas[0][12], 76);      // 100 + 21 − 45
+  assert.equal(filas[1][12], 220);
+});
+
+test("filasAplifisa: sujeto pasivo con X; abono en negativo; el total leído manda", () => {
+  const [sp] = filasAplifisa({ ...VACIA, base_imponible: 500, iva_tipo: 0, sujeto_pasivo: true });
+  assert.equal(sp[13], "X");
+  const [abono] = filasAplifisa({ ...VACIA, base_imponible: -390, iva_tipo: 21, total: -471.9 });
+  assert.equal(abono[8], -81.9);
+  assert.equal(abono[12], -471.9);
+});
+
+test("regimenDe: autónomos al programa fiscal, sociedades a partida doble", () => {
+  assert.equal(regimenDe("12345678Z"), "fiscal");   // DNI
+  assert.equal(regimenDe("X1234567L"), "fiscal");   // NIE
+  assert.equal(regimenDe("E06123456"), "fiscal");   // C.B. (supuesto)
+  assert.equal(regimenDe("B23899974"), "partida_doble");
+  assert.equal(regimenDe("B23899974", "fiscal"), "fiscal"); // lo fijado por el despacho manda
+});
+
+test("cuentas: 8 dígitos con ceros en sociedades, código del listado en autónomos", () => {
+  assert.equal(subcuenta8("627"), "62700000");
+  assert.equal(subcuenta8("6280"), "62800000");
+  assert.equal(subcuenta8("410000231"), "410000231"); // empresas antiguas con 9
+  const codigos = codigosDe("gasto");
+  assert.equal(cuentaSegunRegimen("627", "partida_doble", codigos), "62700000");
+  assert.equal(cuentaSegunRegimen("62800000", "fiscal", codigos), "628");
+  assert.equal(cuentaSegunRegimen("999", "fiscal", codigos), null);
+});
+
+test("conceptos: el listado de Aplifisa completo", () => {
+  assert.equal(CONCEPTOS_GASTO.length, 56);
+  assert.equal(CONCEPTOS_INGRESO.length, 9);
+  assert.equal(CONCEPTOS_GASTO.filter((c) => c.codigo === "628").length, 5); // luz, agua, gas…
+  assert.ok(codigosDe("ingreso").includes("705"));
+});
+
+test("avisos: importes que no cuadran y datos que faltan", () => {
+  const buena = { ...VACIA, numero_factura: "1", fecha: "2026-10-02", proveedor_cif: "B1", subcuenta: "62700000", subcuenta_tercero: "41000001", base_imponible: 100, iva_tipo: 21, total: 121 };
+  assert.deepEqual(avisosFactura(buena, "partida_doble"), []);
+
+  // Suplido de 30 €: 100 + 21 ≠ 151 → rojo.
+  const suplido = avisosFactura({ ...buena, total: 151 }, "partida_doble");
+  assert.equal(suplido[0].codigo, "cuadre");
+  assert.equal(confianzaConAvisos(98, suplido), 59);
+
+  // Proveedor nuevo en una sociedad: falta su subcuenta → naranja (se pone una vez).
+  const nuevo = avisosFactura({ ...buena, subcuenta_tercero: null }, "partida_doble");
+  assert.deepEqual(nuevo.map((a) => a.codigo), ["sin_subcuenta_tercero"]);
+  assert.equal(confianzaConAvisos(98, nuevo), 89);
+  // En autónomos esa subcuenta no se usa.
+  assert.deepEqual(avisosFactura({ ...buena, subcuenta_tercero: null, subcuenta: "627" }, "fiscal"), []);
+
+  assert.ok(avisosFactura({ ...buena, numero_factura: null }, "partida_doble").some((a) => a.codigo === "sin_numero"));
+});
+
+test("periodos: trimestre o mes; la fecha contable manda", () => {
+  assert.equal(trimestreDe("2026-01-15"), "2026-1T");
+  assert.equal(trimestreDe("2026-10-01"), "2026-4T");
+  assert.deepEqual(rangoTrimestre("2026-1T"), { desde: "2026-01-01", hasta: "2026-03-31" });
+  assert.deepEqual(rangoPeriodo("2026-4T"), { desde: "2026-10-01", hasta: "2026-12-31" });
+  assert.deepEqual(rangoPeriodo("2026-02"), { desde: "2026-02-01", hasta: "2026-02-28" });
+  assert.deepEqual(rangoPeriodo("2024-02")?.hasta, "2024-02-29");
+  assert.equal(rangoPeriodo("2026-5T"), null);
+  assert.equal(rangoPeriodo("2026-13"), null);
+  assert.equal(rangoPeriodo("2026-03-01'),x"), null); // no se cuela en el filtro de la consulta
+  assert.equal(fechaDelLibro({ fecha: "2026-09-20", fecha_contable: "2026-10-01" }), "2026-10-01");
+});
+
+const RUTA = "LARAMARCOS_BADAJOZ/01. CLIENTES/KANTARADS DIGITAL, S.L./07. CONTABILIDAD/AÑO 2026/1º TRIMESTRE/GASTOS/fra.pdf";
+
+test("parsearRutaServidor: la estructura real del despacho", () => {
+  assert.deepEqual(parsearRutaServidor(RUTA, OFIS), {
+    oficina: "Badajoz",
+    carpetaCliente: "KANTARADS DIGITAL, S.L.",
+    tipo: "gasto",
+    trimestre: "2026-1T",
+    carpetaTrimestre: "LARAMARCOS_BADAJOZ/01. CLIENTES/KANTARADS DIGITAL, S.L./07. CONTABILIDAD/AÑO 2026/1º TRIMESTRE",
+  });
+  const db = parsearRutaServidor("LARAMARCOS_DONBENITO\\01. CLIENTES\\X\\07. CONTABILIDAD\\AÑO 2026\\4º TRIMESTRE\\INGRESOS\\f.pdf", OFIS);
+  assert.equal(db.oficina, "Don Benito");
+  assert.equal(db.tipo, "ingreso");
+  assert.equal(db.trimestre, "2026-4T");
+});
+
+test("parsearRutaServidor: el número delante de cada carpeta no importa, solo el nombre", () => {
+  const r = parsearRutaServidor(
+    "LARAMARCOS_ORELLANA/03. CLIENTES/AUTONOMO SL/11. CONTABILIDAD/AÑO 2027/2º TRIMESTRE/GASTOS/f.pdf", OFIS);
+  assert.equal(r.oficina, "Orellana");
+  assert.equal(r.carpetaCliente, "AUTONOMO SL");
+  assert.equal(r.trimestre, "2027-2T");
+  const sinNumero = parsearRutaServidor("LARAMARCOS_CASTUERA/CLIENTES/Y/CONTABILIDAD/AÑO 2026/3º TRIMESTRE/GASTOS/f.pdf", OFIS);
+  assert.equal(sinNumero.carpetaCliente, "Y");
+  assert.equal(sinNumero.trimestre, "2026-3T");
+});
+
+test("fechaContablePorCarpeta: factura atrasada, conserva su fecha y va al libro de la carpeta", () => {
+  assert.equal(fechaContablePorCarpeta("2026-09-20", "2026-4T"), "2026-10-01");
+  assert.equal(fechaContablePorCarpeta("2026-10-05", "2026-4T"), null);
+  assert.equal(fechaContablePorCarpeta(null, "2026-4T"), null);
 });
 
 test("esExportable: revisadas o verdes", () => {
   assert.equal(esExportable({ revisada: false, confianza: 95 }), true);
   assert.equal(esExportable({ revisada: true, confianza: 30 }), true);
   assert.equal(esExportable({ revisada: false, confianza: 75 }), false);
-});
-
-test("trimestres", () => {
-  assert.equal(trimestreDe("2026-01-15"), "2026-1T");
-  assert.equal(trimestreDe("2026-09-30"), "2026-3T");
-  assert.equal(trimestreDe("2026-10-01"), "2026-4T");
-  assert.deepEqual(rangoTrimestre("2026-1T"), { desde: "2026-01-01", hasta: "2026-03-31" });
-  assert.deepEqual(rangoTrimestre("2024-1T")?.hasta, "2024-03-31");
-  assert.deepEqual(rangoTrimestre("2026-4T"), { desde: "2026-10-01", hasta: "2026-12-31" });
-  assert.equal(rangoTrimestre("2026-5T"), null);
-  assert.equal(rangoTrimestre("2026-03-01'),x"), null); // no se cuela en el filtro de la consulta
 });
 
 const CLIENTES: ClienteCarpeta[] = [
@@ -105,10 +210,8 @@ test("resolverClienteCarpeta: ante la duda, ninguno", () => {
   assert.equal(resolverClienteCarpeta("Varios", "Don Benito", CLIENTES), null);
 });
 
-const OFIS = ["Badajoz", "Castuera", "Don Benito", "Orellana"];
-
 test("esCarpetaDePeriodo: años y trimestres no son clientes", () => {
-  for (const p of ["2026", "3T", "T3", "2026-3T", "3º Trimestre", "1er trimestre", "4T 2025"]) {
+  for (const p of ["2026", "AÑO 2026", "3T", "T3", "2026-3T", "3º Trimestre", "1º TRIMESTRE", "1er trimestre", "4T 2025"]) {
     assert.equal(esCarpetaDePeriodo(p), true, p);
   }
   for (const p of ["2034 - PEREZ", "Facturas recibidas", "12345678Z"]) {
@@ -128,6 +231,17 @@ test("resolverClienteRuta: carpeta subida desde la oficina, el cliente o más ab
   assert.equal(resolverClienteRuta([], conCodigo2026, OFIS), null);
 });
 
+test("resolverClienteRuta: estructura real del servidor (el cliente sigue a CLIENTES)", () => {
+  const cartera: ClienteCarpeta[] = [
+    ...CLIENTES,
+    { id: "k", codigo: "1057", cif: "B23899974", razon_social: "KANTARADS DIGITAL, S.L.", oficina: "Badajoz" },
+  ];
+  const carpetas = RUTA.split("/").slice(0, -1);
+  assert.equal(resolverClienteRuta(carpetas, cartera, OFIS)?.id, "k");
+  // La oficina de la carpeta restringe: en Don Benito no hay ningún Kantarads.
+  assert.equal(resolverClienteRuta(["LARAMARCOS_DONBENITO", "01. CLIENTES", "KANTARADS DIGITAL, S.L."], cartera, OFIS), null);
+});
+
 test("mimeFactura: PDF e imágenes, por extensión aunque el navegador no dé tipo", () => {
   assert.equal(mimeFactura("F1.PDF", ""), "application/pdf");
   assert.equal(mimeFactura("foto.jpg", ""), "image/jpeg");
@@ -145,17 +259,24 @@ test("generarExcelAplifisa: hoja importable + pendientes aparte", async () => {
     { ...base, fecha: "2026-08-02", numero_factura: "2", proveedor_nombre: "B", base_imponible: 100, iva_tipo: 21 },
     { ...base, fecha: "2026-07-10", numero_factura: "1", proveedor_nombre: "A", base_imponible: 50, iva_tipo: 10 },
     { ...base, fecha: "2026-07-11", numero_factura: "3", confianza: 40 },
+    // Atrasada: fecha de junio, contabilizada el 1 de julio → va la primera por fecha contable.
+    { ...base, fecha: "2026-06-20", fecha_contable: "2026-07-01", numero_factura: "0", revisada: true,
+      lineas_iva: [{ base: 10, tipo: 21, cuota: 2.1 }, { base: 20, tipo: 10, cuota: 2 }] },
   ]);
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buf as unknown as ArrayBuffer);
 
   const libro = wb.getWorksheet("Libro de Facturas")!;
   assert.deepEqual((libro.getRow(1).values as unknown[]).slice(1), [...COLUMNAS_APLIFISA]);
-  assert.equal(libro.rowCount, 3);                        // cabecera + 2 verdes
-  assert.equal(libro.getCell("B2").value, "1");           // ordenadas por fecha
-  assert.equal(libro.getCell("A2").numFmt, "dd/mm/yyyy");
-  assert.equal(libro.getCell("G2").value, 0.1);
-  assert.equal(libro.getCell("L3").value, 121);
+  assert.equal(libro.rowCount, 5);                        // cabecera + atrasada (2 filas de IVA) + 2 verdes
+  assert.equal(libro.getCell("B2").value, "0");           // ordenadas por fecha contable
+  assert.equal(libro.getCell("B3").value, "0");           // segunda línea de IVA de la misma factura
+  assert.equal(libro.getCell("H3").value, 10);
+  assert.equal(libro.getCell("B4").value, "1");
+  assert.equal(libro.getCell("A4").numFmt, "dd/mm/yyyy");
+  assert.equal(libro.getCell("H4").value, 10);            // % como 10, no 0,10
+  assert.equal(libro.getCell("H4").numFmt, "0.00");
+  assert.equal(libro.getCell("M5").value, 121);           // Total Factura
 
   const pend = wb.getWorksheet("Pendientes de revisar")!;
   assert.equal(pend.rowCount, 2);

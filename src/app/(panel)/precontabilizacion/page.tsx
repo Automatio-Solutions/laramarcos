@@ -9,6 +9,8 @@ import { aprobarFacturaAction } from "./actions";
 export const maxDuration = 60;
 
 const eur = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" });
+const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+
 /** El trimestre actual y los cinco anteriores ("2026-3T"…). */
 function ultimosTrimestres(n = 6): string[] {
   const hoy = new Date();
@@ -16,10 +18,20 @@ function ultimosTrimestres(n = 6): string[] {
     trimestreDe(new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - i * 3, 1))));
 }
 
+/** El mes actual y los once anteriores ("2026-09"…): hay clientes que van por meses. */
+function ultimosMeses(n = 12): { valor: string; texto: string }[] {
+  const hoy = new Date();
+  return Array.from({ length: n }, (_, i) => {
+    const d = new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - i, 1));
+    const m = d.getUTCMonth();
+    return { valor: `${d.getUTCFullYear()}-${String(m + 1).padStart(2, "0")}`, texto: `${MESES[m]} ${d.getUTCFullYear()}` };
+  });
+}
+
 const COLOR = { verde: "bg-success/10 text-success", naranja: "bg-warning/10 text-warning", rojo: "bg-error/10 text-error" };
 
 interface FacturaRow {
-  id: string; proveedor_nombre: string | null; proveedor_cif: string | null;
+  id: string; tipo: "gasto" | "ingreso"; proveedor_nombre: string | null; proveedor_cif: string | null;
   base_imponible: number | null; iva_tipo: number | null; subcuenta: string | null;
   confianza: number; revisada: boolean; archivo_nombre: string | null;
   cliente: { razon_social: string } | null;
@@ -28,7 +40,7 @@ interface FacturaRow {
 export default async function PrecontabilizacionPage() {
   const supabase = await createClient();
   const [{ data }, clientes] = await Promise.all([
-    supabase.from("facturas_ocr").select("id, proveedor_nombre, proveedor_cif, base_imponible, iva_tipo, subcuenta, confianza, revisada, archivo_nombre, cliente:clientes(razon_social)").order("created_at", { ascending: false }),
+    supabase.from("facturas_ocr").select("id, tipo, proveedor_nombre, proveedor_cif, base_imponible, iva_tipo, subcuenta, confianza, revisada, archivo_nombre, cliente:clientes(razon_social)").order("created_at", { ascending: false }),
     listClientes(),
   ]);
   const facturas = (data ?? []) as unknown as FacturaRow[];
@@ -44,7 +56,7 @@ export default async function PrecontabilizacionPage() {
         </div>
       </header>
 
-      {/* Excel Aplifisa por cliente y trimestre: revisadas y verdes; el resto en "Pendientes de revisar" */}
+      {/* Excel Aplifisa por cliente, libro y periodo: revisadas y verdes; el resto en "Pendientes de revisar" */}
       <form action="/api/facturas/excel" method="get" className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface p-4 text-sm">
         <label className="space-y-1">
           <span className="block text-fg-muted">Cliente</span>
@@ -54,9 +66,21 @@ export default async function PrecontabilizacionPage() {
           </select>
         </label>
         <label className="space-y-1">
-          <span className="block text-fg-muted">Trimestre</span>
-          <select name="trimestre" className="rounded-md border border-border bg-surface px-2 py-2 text-fg">
-            {ultimosTrimestres().map((t) => <option key={t} value={t}>{t}</option>)}
+          <span className="block text-fg-muted">Libro</span>
+          <select name="tipo" className="rounded-md border border-border bg-surface px-2 py-2 text-fg">
+            <option value="gasto">Gastos</option>
+            <option value="ingreso">Ingresos</option>
+          </select>
+        </label>
+        <label className="space-y-1">
+          <span className="block text-fg-muted">Periodo</span>
+          <select name="periodo" className="rounded-md border border-border bg-surface px-2 py-2 text-fg">
+            <optgroup label="Trimestre">
+              {ultimosTrimestres().map((t) => <option key={t} value={t}>{t}</option>)}
+            </optgroup>
+            <optgroup label="Mes">
+              {ultimosMeses().map((m) => <option key={m.valor} value={m.valor}>{m.texto}</option>)}
+            </optgroup>
           </select>
         </label>
         <button className="rounded-md bg-primary px-4 py-2 font-medium text-white hover:bg-[var(--color-primary-hover)]">⬇ Excel Aplifisa</button>
@@ -77,8 +101,9 @@ export default async function PrecontabilizacionPage() {
           <thead className="bg-surface-raised text-left text-fg-muted">
             <tr>
               <th className="px-4 py-3 font-medium" />
-              <th className="px-4 py-3 font-medium">Proveedor</th>
+              <th className="px-4 py-3 font-medium">Proveedor / cliente</th>
               <th className="px-4 py-3 font-medium">Cliente</th>
+              <th className="px-4 py-3 font-medium">Libro</th>
               <th className="px-4 py-3 font-medium text-right">Base</th>
               <th className="px-4 py-3 font-medium">Subcuenta</th>
               <th className="px-4 py-3 font-medium text-right">Conf.</th>
@@ -86,7 +111,7 @@ export default async function PrecontabilizacionPage() {
             </tr>
           </thead>
           <tbody>
-            {facturas.length === 0 && <tr><td colSpan={7} className="px-4 py-10 text-center text-fg-muted">Sin facturas. Sube la primera.</td></tr>}
+            {facturas.length === 0 && <tr><td colSpan={8} className="px-4 py-10 text-center text-fg-muted">Sin facturas. Sube la primera.</td></tr>}
             {facturas.map((f) => {
               const s = semaforo(f.confianza);
               return (
@@ -94,6 +119,7 @@ export default async function PrecontabilizacionPage() {
                   <td className="px-4 py-2.5"><span className={`inline-block h-2.5 w-2.5 rounded-full ${s === "verde" ? "bg-success" : s === "naranja" ? "bg-warning" : "bg-error"}`} /></td>
                   <td className="px-4 py-2.5 text-fg">{f.proveedor_nombre ?? <span className="text-fg-muted">{f.archivo_nombre}</span>}</td>
                   <td className="px-4 py-2.5 text-fg-muted">{f.cliente?.razon_social ?? <span className="text-error">Sin cliente</span>}</td>
+                  <td className="px-4 py-2.5 text-fg-muted">{f.tipo === "ingreso" ? "Ingresos" : "Gastos"}</td>
                   <td className="px-4 py-2.5 text-right text-fg">{f.base_imponible != null ? eur.format(f.base_imponible) : "—"}</td>
                   <td className="px-4 py-2.5 font-mono text-xs text-fg-muted">{f.subcuenta ?? "—"}</td>
                   <td className="px-4 py-2.5 text-right"><span className={`rounded px-1.5 py-0.5 text-xs ${COLOR[s]}`}>{f.confianza}%</span></td>

@@ -20,8 +20,10 @@ interface Item {
   estado: Estado;
   semaforo?: "verde" | "naranja" | "rojo";
   id?: string;
-  /** Cliente detectado por carpeta (con "Detectar por nombre de carpeta"). */
+  /** Cliente y libro detectados por carpeta (con "Detectar por carpeta"). */
   cliente?: { id: string; razon_social: string };
+  libro?: "gasto" | "ingreso";
+  detectada?: boolean;
   mensaje?: string;
 }
 
@@ -29,6 +31,7 @@ interface Item {
 const EN_PARALELO = 3;
 const DETECTAR = "__carpeta";
 const NO_DETECTADO = "Cliente no detectado: súbela eligiendo el cliente.";
+const LIBRO_NO_DETECTADO = "No está en una carpeta GASTOS o INGRESOS: elige el libro.";
 
 const ETIQUETA: Record<Estado, string> = {
   cola: "En cola",
@@ -69,6 +72,7 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
   const [items, setItems] = useState<Item[]>([]);
   const [ignorados, setIgnorados] = useState(0);
   const [cliente, setCliente] = useState("");
+  const [libro, setLibro] = useState("");
   const [enMarcha, setEnMarcha] = useState(false);
   const [encima, setEncima] = useState(false);
   const itemsRef = useRef<Item[]>([]);
@@ -114,6 +118,8 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
     const supabase = createClient();
     const cliente_id = cliente === DETECTAR ? it.cliente?.id : cliente;
     if (!cliente_id) return actualizar(it.key, { estado: "error", mensaje: NO_DETECTADO });
+    const libroFactura = libro === DETECTAR ? it.libro : libro === "ingreso" ? "ingreso" : libro === "gasto" ? "gasto" : undefined;
+    if (!libroFactura) return actualizar(it.key, { estado: "error", mensaje: LIBRO_NO_DETECTADO });
     try {
       actualizar(it.key, { estado: "subiendo", mensaje: undefined });
       const prep = await prepararSubidaAction(it.file.name, it.file.type, it.file.size, cliente_id);
@@ -128,9 +134,10 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
       const r = await procesarSubidaAction({
         path: prep.path,
         nombre: it.file.name,
-        tipo: it.file.type,
+        mimeNavegador: it.file.type,
         rutaRelativa: it.ruta,
         cliente_id,
+        libro: libroFactura,
       });
       if (r.estado === "ok") actualizar(it.key, { estado: "ok", semaforo: r.semaforo, id: r.id });
       else if (r.estado === "duplicada") actualizar(it.key, { estado: "duplicada", id: r.id });
@@ -141,16 +148,23 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
   }
 
   async function procesar() {
-    if (!cliente) return;
+    if (!cliente || !libro) return;
     setEnMarcha(true);
-    // Detectar por carpeta: se resuelve todo el lote ANTES de subir. Lo que no
-    // tenga cliente no se sube: se marca para subirlo eligiendo el cliente a mano.
-    if (cliente === DETECTAR) {
-      const pendientes = itemsRef.current.filter((i) => i.estado === "cola" && !i.cliente);
+    // Detectar por carpeta: cliente y libro de todo el lote se resuelven ANTES de
+    // subir. Lo no detectado no se sube: se reintenta eligiéndolo a mano.
+    if (cliente === DETECTAR || libro === DETECTAR) {
+      const pendientes = itemsRef.current.filter((i) => i.estado === "cola" && !i.detectada);
       const detectados = pendientes.length ? await detectarClientesAction(pendientes.map((i) => i.ruta)) : [];
       pendientes.forEach((it, n) => {
-        const c = detectados[n];
-        actualizar(it.key, c ? { cliente: c } : { estado: "error", mensaje: NO_DETECTADO });
+        const d = detectados[n];
+        const falta =
+          cliente === DETECTAR && !d?.cliente ? NO_DETECTADO : libro === DETECTAR && !d?.libro ? LIBRO_NO_DETECTADO : null;
+        actualizar(it.key, {
+          detectada: true,
+          cliente: d?.cliente ?? undefined,
+          libro: d?.libro ?? undefined,
+          ...(falta ? { estado: "error" as const, mensaje: falta } : {}),
+        });
       });
     }
     let hechas = 0;
@@ -185,6 +199,7 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
   const enCola = cuenta("cola");
   const errores = cuenta("error");
   const hayCarpetas = items.some((i) => i.ruta);
+  const detectando = cliente === DETECTAR || libro === DETECTAR;
 
   return (
     <section
@@ -211,6 +226,20 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
             {clientes.map((c) => <option key={c.id} value={c.id}>{c.razon_social}</option>)}
           </select>
         </label>
+        <label className="space-y-1">
+          <span className="block text-fg-muted">Libro</span>
+          <select
+            value={libro}
+            onChange={(e) => setLibro(e.target.value)}
+            disabled={enMarcha}
+            className="rounded-md border border-border bg-surface px-2 py-2 text-fg"
+          >
+            <option value="" disabled>— Gastos o ingresos —</option>
+            <option value="gasto">Gastos (facturas recibidas)</option>
+            <option value="ingreso">Ingresos (facturas emitidas)</option>
+            <option value={DETECTAR}>📁 Por carpeta GASTOS / INGRESOS</option>
+          </select>
+        </label>
         <input ref={archivosRef} type="file" multiple accept=".pdf,image/*" hidden
           onChange={(e) => { anadir([...(e.target.files ?? [])].map((file) => ({ file, ruta: null }))); e.target.value = ""; }} />
         <input ref={carpetaRef} type="file" hidden
@@ -226,7 +255,7 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
           className="rounded-md border border-border px-4 py-2 font-medium text-fg hover:bg-surface-raised disabled:opacity-50">
           📁 Elegir carpeta
         </button>
-        <button type="button" disabled={enMarcha || enCola === 0 || !cliente} onClick={() => void procesar()}
+        <button type="button" disabled={enMarcha || enCola === 0 || !cliente || !libro} onClick={() => void procesar()}
           className="rounded-md bg-primary px-4 py-2 font-medium text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50">
           {enMarcha ? "Procesando…" : `Subir y procesar${enCola ? ` ${enCola}` : ""}`}
         </button>
@@ -234,7 +263,7 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
 
       {items.length === 0 ? (
         <p className="rounded-md border border-dashed border-border px-4 py-6 text-center text-fg-muted">
-          Elige el cliente y arrastra aquí facturas o carpetas (PDF, JPG, PNG), o usa los botones.
+          Elige cliente y libro, y arrastra aquí facturas o carpetas (PDF, JPG, PNG), o usa los botones.
         </p>
       ) : (
         <>
@@ -257,11 +286,11 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
               <div className="h-full bg-primary transition-all" style={{ width: `${(terminadas / items.length) * 100}%` }} />
             </div>
             {enMarcha && <p className="text-xs text-fg-muted">No cierres esta pestaña hasta que termine.</p>}
-            {!cliente && enCola > 0 && (
-              <p className="text-xs text-warning">Elige el cliente para poder subir: toda factura tiene que ir asignada a uno.</p>
+            {(!cliente || !libro) && enCola > 0 && (
+              <p className="text-xs text-warning">Elige el cliente y el libro (gastos o ingresos) para poder subir.</p>
             )}
-            {cliente === DETECTAR && !hayCarpetas && (
-              <p className="text-xs text-warning">Para detectar el cliente hay que subir carpetas; estos archivos no se subirán.</p>
+            {detectando && !hayCarpetas && (
+              <p className="text-xs text-warning">Para detectar por carpeta hay que subir carpetas; estos archivos no se subirán.</p>
             )}
           </div>
 
@@ -270,7 +299,11 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
               <li key={i.key} className="flex items-center gap-3 px-3 py-2">
                 <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${i.semaforo ? PUNTO[i.semaforo] : "bg-border"}`} />
                 <span className="min-w-0 flex-1 truncate text-fg" title={i.ruta ?? i.file.name}>{i.ruta ?? i.file.name}</span>
-                {i.cliente && <span className="hidden truncate text-xs text-fg-muted sm:inline">{i.cliente.razon_social}</span>}
+                {(i.cliente || i.libro) && (
+                  <span className="hidden truncate text-xs text-fg-muted sm:inline">
+                    {[i.cliente?.razon_social, i.libro && (i.libro === "gasto" ? "Gastos" : "Ingresos")].filter(Boolean).join(" · ")}
+                  </span>
+                )}
                 <span className={`shrink-0 text-xs ${i.estado === "error" ? "text-error" : "text-fg-muted"}`} title={i.mensaje}>
                   {i.estado === "error" && i.mensaje ? i.mensaje : ETIQUETA[i.estado]}
                 </span>

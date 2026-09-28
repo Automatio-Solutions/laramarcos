@@ -2,7 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { procesarFactura } from "./procesar";
-import { semaforo, type ClienteCarpeta, type Semaforo } from "./core";
+import { fechaContablePorCarpeta, semaforo, type ClienteCarpeta, type Semaforo, type TipoFactura } from "./core";
 
 /** Huella del fichero: la misma factura no se procesa dos veces (app o servidor). */
 export const huella = (buffer: Buffer) => createHash("sha256").update(buffer).digest("hex");
@@ -33,6 +33,10 @@ export interface EntradaFactura {
   base64: string;
   mime: string;
   cliente_id: string | null;
+  /** Libro: gastos (recibidas) o ingresos (emitidas). */
+  tipo: TipoFactura;
+  /** Libro del servidor ("2026-1T"): si la factura es de antes, se contabiliza ahí. */
+  trimestreCarpeta?: string | null;
   archivo_nombre: string;
   origen: "app" | "servidor";
   /** Subida desde la app: ruta en Supabase Storage. */
@@ -47,33 +51,42 @@ export interface EntradaFactura {
  * UC-402 + UC-403: lee la factura y la guarda. Mismo camino para la subida manual
  * y para el programa del servidor. `db` es el cliente con el que se inserta (el del
  * usuario, para respetar RLS, o el admin cuando llama el programa); `admin` se usa
- * para consultar la memoria de proveedores.
+ * para el contexto del cliente y la memoria de cuentas.
  */
 export async function registrarFactura(
   db: SupabaseClient,
   admin: SupabaseClient,
   e: EntradaFactura,
 ): Promise<{ id: string; semaforo: Semaforo; fecha: string | null }> {
-  const r = await procesarFactura(admin, e.base64, e.mime);
+  const { data: cliente } = e.cliente_id
+    ? await admin.from("clientes").select("id, cif, razon_social, regimen_contable").eq("id", e.cliente_id).maybeSingle()
+    : { data: null };
+  const r = await procesarFactura(admin, e.base64, e.mime, { tipo: e.tipo, cliente });
   const { data, error } = await db
     .from("facturas_ocr")
     .insert({
       cliente_id: e.cliente_id,
+      tipo: e.tipo,
       numero_factura: r.numero_factura,
       proveedor_cif: r.proveedor_cif,
       proveedor_nombre: r.proveedor_nombre,
       fecha: r.fecha,
+      fecha_contable: fechaContablePorCarpeta(r.fecha, e.trimestreCarpeta ?? null),
       concepto: r.concepto,
       base_imponible: r.base_imponible,
       iva_tipo: r.iva_tipo,
       iva_cuota: r.iva_cuota,
+      lineas_iva: r.lineas_iva,
       retencion_base: r.retencion_base,
       retencion_tipo: r.retencion_tipo,
       retencion_cuota: r.retencion_cuota,
       total: r.total,
       subcuenta: r.subcuenta,
+      subcuenta_tercero: r.subcuenta_tercero,
+      sujeto_pasivo: r.sujeto_pasivo,
       subcuenta_motivo: r.subcuenta_motivo,
       subcuenta_origen: r.subcuenta_origen,
+      avisos: r.avisos,
       confianza: r.confianza,
       origen: e.origen,
       archivo_path: e.archivo_path ?? null,
@@ -89,35 +102,44 @@ export async function registrarFactura(
 }
 
 /**
- * AC-06/AC-10: memoria de proveedores. Si el proveedor no existe se crea (antes la
- * corrección de un proveedor nuevo se perdía). Con `sobrescribir` la subcuenta del
- * asesor pisa la habitual; sin él solo se rellena si no había ninguna.
- * Va con el cliente admin: el asesor no tiene permiso de escritura en proveedores
- * y esta memoria es del despacho, no de un usuario.
+ * AC-06/AC-10: memoria de cuentas POR CLIENTE. El mismo proveedor tiene una
+ * subcuenta distinta en cada empresa que lleva el despacho, así que se guarda por
+ * cliente + libro + NIF. Con `sobrescribir` lo que pone el asesor pisa lo
+ * memorizado; sin él (aprobar) solo rellena lo que faltaba. Va con el cliente
+ * admin: es memoria del despacho, no de un usuario.
  */
-export async function memorizarProveedor(
+export async function memorizarCuentas(
   admin: SupabaseClient,
-  p: { cif: string | null; nombre: string | null; subcuenta: string | null; iva_tipo: number | null },
+  m: {
+    cliente_id: string | null;
+    tipo: TipoFactura;
+    nif: string | null;
+    nombre: string | null;
+    subcuenta: string | null;
+    subcuenta_tercero: string | null;
+    iva_tipo: number | null;
+  },
   { sobrescribir }: { sobrescribir: boolean },
 ): Promise<void> {
-  const cif = p.cif?.trim().toUpperCase();
-  if (!cif || !p.subcuenta) return;
-  const { data: prov } = await admin
-    .from("proveedores")
-    .select("id, subcuenta_habitual, iva_default")
-    .eq("cif", cif)
+  const nif = m.nif?.trim().toUpperCase();
+  if (!m.cliente_id || !nif || (!m.subcuenta && !m.subcuenta_tercero)) return;
+  const { data: prev } = await admin
+    .from("cuentas_terceros")
+    .select("id, subcuenta, subcuenta_tercero, iva_default")
+    .eq("cliente_id", m.cliente_id)
+    .eq("tipo", m.tipo)
+    .eq("nif", nif)
     .maybeSingle();
-  if (!prov) {
-    await admin.from("proveedores").insert({
-      cif,
-      nombre: p.nombre?.trim() || cif,
-      subcuenta_habitual: p.subcuenta,
-      iva_default: p.iva_tipo,
+  if (!prev) {
+    await admin.from("cuentas_terceros").insert({
+      cliente_id: m.cliente_id, tipo: m.tipo, nif, nombre: m.nombre?.trim() || null,
+      subcuenta: m.subcuenta, subcuenta_tercero: m.subcuenta_tercero, iva_default: m.iva_tipo,
     });
     return;
   }
   const cambios: Record<string, unknown> = {};
-  if (sobrescribir || !prov.subcuenta_habitual) cambios.subcuenta_habitual = p.subcuenta;
-  if (prov.iva_default == null && p.iva_tipo != null) cambios.iva_default = p.iva_tipo;
-  if (Object.keys(cambios).length) await admin.from("proveedores").update(cambios).eq("id", prov.id);
+  if (m.subcuenta && (sobrescribir || !prev.subcuenta)) cambios.subcuenta = m.subcuenta;
+  if (m.subcuenta_tercero && (sobrescribir || !prev.subcuenta_tercero)) cambios.subcuenta_tercero = m.subcuenta_tercero;
+  if (prev.iva_default == null && m.iva_tipo != null) cambios.iva_default = m.iva_tipo;
+  if (Object.keys(cambios).length) await admin.from("cuentas_terceros").update(cambios).eq("id", prev.id);
 }

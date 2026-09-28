@@ -10,35 +10,60 @@ export function semaforo(confianza: number): Semaforo {
 }
 
 export type OrigenSubcuenta = "historico" | "ia" | "manual";
+export type TipoFactura = "gasto" | "ingreso";
+/** Sociedades → partida doble (subcuentas); autónomos → programa fiscal (código de concepto). */
+export type Regimen = "partida_doble" | "fiscal";
+
+/** Un tipo de IVA dentro de la factura: cada uno va en su propia fila del Excel. */
+export interface LineaIva {
+  base: number | null;
+  tipo: number | null;
+  cuota: number | null;
+}
 
 export interface FacturaDatos {
+  tipo: TipoFactura;
   fecha: string | null;
+  /** Periodo en el que se contabiliza si no es el de su fecha (factura atrasada). */
+  fecha_contable: string | null;
   numero_factura: string | null;
+  /** El tercero: proveedor en gastos, cliente en ingresos. */
   proveedor_nombre: string | null;
   proveedor_cif: string | null;
   concepto: string | null;
   base_imponible: number | null;
   iva_tipo: number | null;
   iva_cuota: number | null;
+  /** Varios tipos de IVA. Vacío = una sola línea con base/iva_tipo/iva_cuota. */
+  lineas_iva: LineaIva[];
   /** Retención de IRPF (profesionales, alquileres). Tipo en %, como el IVA. */
   retencion_base: number | null;
   retencion_tipo: number | null;
   retencion_cuota: number | null;
   total: number | null;
+  /** Columna "Subcuenta": cuenta de gasto/ingreso (62700000) o código de concepto (627). */
   subcuenta: string | null;
+  /** Columna "Subcuenta Gasto/Ingreso": la del proveedor/cliente en ESTE cliente (41000023). */
+  subcuenta_tercero: string | null;
+  sujeto_pasivo: boolean;
   /** Por qué esa subcuenta (AC-02). Solo se rellena cuando la sugiere la IA. */
   subcuenta_motivo: string | null;
   /** De dónde salió: histórico del proveedor (UC-403), sugerencia IA o manual. */
   subcuenta_origen: OrigenSubcuenta | null;
 }
 
-/** Columnas del "MODELO LIBRO FACTURAS.xlsx" del despacho, en su orden y con sus nombres. */
+/**
+ * Columnas del "MODELO LIBRO FACTURAS.xlsx" del despacho, con las dos que se
+ * acordaron después: "Subcuenta Gasto/Ingreso" (subcuenta del proveedor o
+ * cliente) junto a "Subcuenta", y "Sujeto Pasivo" al final.
+ */
 export const COLUMNAS_APLIFISA = [
   "Fecha Expedición *",
   "Nº Factura *",
   "Nombre *",
   "NIF",
   "Subcuenta",
+  "Subcuenta Gasto/Ingreso",
   "Base Imponible",
   "% IVA",
   "Cuota IVA",
@@ -46,6 +71,7 @@ export const COLUMNAS_APLIFISA = [
   "% Retencion",
   "Cuota retencion",
   "Total Factura",
+  "Sujeto Pasivo",
 ] as const;
 
 export type CeldaAplifisa = string | number | Date;
@@ -65,35 +91,56 @@ function aFecha(iso: string | null): Date | "" {
   return new Date(Date.UTC(y, m - 1, d));
 }
 
-/**
- * Las instrucciones del modelo piden los porcentajes "en tanto por uno (0,21 para 21%)".
- * Se escribe 0.21 y la celda se formatea como porcentaje, así se lee "21%".
- * PENDIENTE de confirmar con el despacho contra una importación real en Aplifisa.
- */
-const aFraccion = (pct: number | null) => (pct == null ? "" : Math.round(pct * 100) / 10000);
+/** Las líneas de IVA de la factura; sin desglose, una sola con los campos generales. */
+export function lineasDe(f: FacturaDatos): LineaIva[] {
+  const conDatos = (f.lineas_iva ?? []).filter((l) => l.base != null || l.cuota != null);
+  if (conDatos.length) return conDatos;
+  return [{ base: f.base_imponible, tipo: f.iva_tipo, cuota: f.iva_cuota }];
+}
 
-/** AC-07: fila en el orden exacto del modelo Aplifisa, con cuotas y total calculados si faltan. */
-export function filaAplifisa(f: FacturaDatos): CeldaAplifisa[] {
-  const base = f.base_imponible;
-  const cuotaIva = f.iva_cuota ?? inferirCuotaIva(base, f.iva_tipo);
-  const hayRetencion = f.retencion_tipo != null || f.retencion_cuota != null;
-  const baseRet = f.retencion_base ?? (hayRetencion ? base : null);
-  const cuotaRet = f.retencion_cuota ?? inferirCuotaIva(baseRet, f.retencion_tipo);
-  const total = f.total ?? (base != null ? redondea(base + (cuotaIva ?? 0) - (cuotaRet ?? 0)) : null);
-  return [
-    aFecha(f.fecha),
-    f.numero_factura ?? "",
-    f.proveedor_nombre ?? "",
-    f.proveedor_cif ?? "",
-    f.subcuenta ?? "",
-    base ?? "",
-    aFraccion(f.iva_tipo),
-    cuotaIva ?? "",
-    baseRet ?? "",
-    aFraccion(f.retencion_tipo),
-    cuotaRet ?? "",
-    total ?? "",
-  ];
+/** Retención de la factura, con base y cuota completadas si faltan. */
+function retencionDe(f: FacturaDatos) {
+  const hay = f.retencion_tipo != null || f.retencion_cuota != null;
+  const baseTotal = lineasDe(f).reduce((s, l) => s + (l.base ?? 0), 0);
+  const base = f.retencion_base ?? (hay ? redondea(baseTotal) : null);
+  const cuota = f.retencion_cuota ?? inferirCuotaIva(base, f.retencion_tipo);
+  return { base, tipo: f.retencion_tipo, cuota };
+}
+
+/**
+ * AC-07: filas del Excel para una factura, en el orden exacto del modelo.
+ * Una fila por tipo de IVA (así lo pide el despacho); la retención va en la
+ * primera. Porcentajes como 21, no 0,21.
+ */
+export function filasAplifisa(f: FacturaDatos): CeldaAplifisa[][] {
+  const lineas = lineasDe(f);
+  const ret = retencionDe(f);
+  return lineas.map((l, i) => {
+    const cuota = l.cuota ?? inferirCuotaIva(l.base, l.tipo);
+    const r = i === 0 ? ret : { base: null, tipo: null, cuota: null };
+    const total =
+      lineas.length === 1 && f.total != null
+        ? f.total
+        : l.base != null
+          ? redondea(l.base + (cuota ?? 0) - (r.cuota ?? 0))
+          : null;
+    return [
+      aFecha(f.fecha),
+      f.numero_factura ?? "",
+      f.proveedor_nombre ?? "",
+      f.proveedor_cif ?? "",
+      f.subcuenta ?? "",
+      f.subcuenta_tercero ?? "",
+      l.base ?? "",
+      l.tipo ?? "",
+      cuota ?? "",
+      r.base ?? "",
+      r.tipo ?? "",
+      r.cuota ?? "",
+      total ?? "",
+      f.sujeto_pasivo ? "X" : "",
+    ];
+  });
 }
 
 /** Va al Excel que se importa: revisada por un asesor o leída con confianza alta. */
@@ -102,7 +149,101 @@ export function esExportable(f: { revisada: boolean; confianza: number }): boole
 }
 
 // ---------------------------------------------------------------------------
-// Trimestres ("2026-3T"): el Excel se genera por cliente y trimestre de expedición.
+// Cuentas y régimen
+// ---------------------------------------------------------------------------
+
+/**
+ * Régimen del cliente. Si el despacho no lo ha fijado, se deduce del NIF:
+ * persona física (DNI/NIE) → programa fiscal; comunidades de bienes (E) y
+ * sociedades civiles (J), que tributan en atribución de rentas como los
+ * autónomos → programa fiscal (SUPUESTO, pendiente de confirmar); el resto
+ * de CIF → partida doble.
+ */
+export function regimenDe(cif: string | null | undefined, fijado?: Regimen | null): Regimen {
+  if (fijado) return fijado;
+  const c = (cif ?? "").trim().toUpperCase();
+  return /^[0-9XYZKLM]/.test(c) || /^[EJ]/.test(c) ? "fiscal" : "partida_doble";
+}
+
+/** Subcuentas de Aplifisa: 8 dígitos, rellenando con ceros (627 → 62700000). */
+export function subcuenta8(cuenta: string | null | undefined): string | null {
+  const d = (cuenta ?? "").replace(/\D/g, "");
+  if (!d) return null;
+  return d.length >= 8 ? d : d.padEnd(8, "0");
+}
+
+/**
+ * La columna "Subcuenta" según el régimen del cliente: sociedades → cuenta de 8
+ * dígitos; autónomos → código de concepto de 3 dígitos, solo si está en el
+ * listado de Aplifisa (`codigos`). null si no encaja.
+ */
+export function cuentaSegunRegimen(
+  cuenta: string | null | undefined,
+  regimen: Regimen,
+  codigos: readonly string[],
+): string | null {
+  if (regimen === "partida_doble") return subcuenta8(cuenta);
+  const codigo = (cuenta ?? "").replace(/\D/g, "").slice(0, 3);
+  return codigos.includes(codigo) ? codigo : null;
+}
+
+// ---------------------------------------------------------------------------
+// Avisos de revisión: lo que el despacho pidió que salte en rojo o naranja.
+// ---------------------------------------------------------------------------
+
+export interface Aviso {
+  codigo: "cuadre" | "sin_numero" | "sin_fecha" | "sin_nif" | "sin_subcuenta_tercero" | "sin_subcuenta" | "libro";
+  texto: string;
+  /** rojo = no se puede importar tal cual; naranja = falta un dato que el asesor pone una vez. */
+  nivel: "rojo" | "naranja";
+}
+
+const eur = (n: number) => n.toFixed(2).replace(".", ",");
+
+export function avisosFactura(f: FacturaDatos, regimen: Regimen): Aviso[] {
+  const avisos: Aviso[] = [];
+  if (!f.numero_factura) avisos.push({ codigo: "sin_numero", texto: "No se ha leído el nº de factura (obligatorio en Aplifisa).", nivel: "rojo" });
+  if (!f.fecha) avisos.push({ codigo: "sin_fecha", texto: "No se ha leído la fecha de expedición.", nivel: "rojo" });
+  if (!f.proveedor_cif) avisos.push({ codigo: "sin_nif", texto: "No se ha leído el NIF del proveedor o cliente.", nivel: "rojo" });
+
+  // Suplidos, conceptos no sujetos…: si base + IVA − retención no da el total, a revisar.
+  const lineas = lineasDe(f);
+  const hayBase = lineas.some((l) => l.base != null);
+  if (f.total != null && hayBase) {
+    const base = lineas.reduce((s, l) => s + (l.base ?? 0), 0);
+    const iva = lineas.reduce((s, l) => s + (l.cuota ?? inferirCuotaIva(l.base, l.tipo) ?? 0), 0);
+    const calculado = redondea(base + iva - (retencionDe(f).cuota ?? 0));
+    if (Math.abs(calculado - f.total) > 0.02) {
+      avisos.push({
+        codigo: "cuadre",
+        texto: `Los importes no cuadran: base + IVA − retención = ${eur(calculado)} € y el total de la factura es ${eur(f.total)} € (¿suplidos o conceptos no sujetos?).`,
+        nivel: "rojo",
+      });
+    }
+  }
+
+  if (!f.subcuenta) avisos.push({ codigo: "sin_subcuenta", texto: "Falta la subcuenta de gasto/ingreso.", nivel: "naranja" });
+  if (regimen === "partida_doble" && !f.subcuenta_tercero) {
+    avisos.push({
+      codigo: "sin_subcuenta_tercero",
+      texto: "Falta la subcuenta del proveedor/cliente en este cliente. Ponla una vez y se recordará.",
+      nivel: "naranja",
+    });
+  }
+  return avisos;
+}
+
+/** La confianza de la IA, rebajada por los avisos: rojo < 60, naranja < 90. */
+export function confianzaConAvisos(confianza: number, avisos: Aviso[]): number {
+  if (avisos.some((a) => a.nivel === "rojo")) return Math.min(confianza, 59);
+  if (avisos.length) return Math.min(confianza, 89);
+  return confianza;
+}
+
+// ---------------------------------------------------------------------------
+// Periodos: el Excel se genera por cliente, tipo y periodo. Cualquier cliente
+// puede ir por trimestre ("2026-3T") o por mes ("2026-07"). Una factura se
+// contabiliza en el periodo de su fecha contable (si la tiene) o de su fecha.
 // ---------------------------------------------------------------------------
 
 export function trimestreDe(fecha: string | Date): string {
@@ -112,23 +253,41 @@ export function trimestreDe(fecha: string | Date): string {
   return `${y}-${Math.ceil(m / 3)}T`;
 }
 
-/** "2026-3T" → { desde: "2026-07-01", hasta: "2026-09-30" }. null si el formato no vale. */
-export function rangoTrimestre(t: string): { desde: string; hasta: string } | null {
-  const m = /^(\d{4})-([1-4])T$/.exec(t);
-  if (!m) return null;
-  const y = Number(m[1]);
-  const q = Number(m[2]);
-  const mesIni = (q - 1) * 3 + 1;
-  const ultimoDia = new Date(Date.UTC(y, mesIni + 2, 0)).getUTCDate();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return { desde: `${y}-${pad(mesIni)}-01`, hasta: `${y}-${pad(mesIni + 2)}-${pad(ultimoDia)}` };
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+/** "2026-3T" o "2026-07" → { desde, hasta } en ISO. null si el formato no vale. */
+export function rangoPeriodo(p: string): { desde: string; hasta: string } | null {
+  const t = /^(\d{4})-([1-4])T$/.exec(p);
+  const m = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(p);
+  if (!t && !m) return null;
+  const y = Number((t ?? m)![1]);
+  const mesIni = t ? (Number(t[2]) - 1) * 3 + 1 : Number(m![2]);
+  const mesFin = t ? mesIni + 2 : mesIni;
+  const ultimoDia = new Date(Date.UTC(y, mesFin, 0)).getUTCDate();
+  return { desde: `${y}-${pad2(mesIni)}-01`, hasta: `${y}-${pad2(mesFin)}-${pad2(ultimoDia)}` };
 }
 
+/** Compatibilidad: rango de un trimestre. */
+export const rangoTrimestre = (t: string) => (/^\d{4}-[1-4]T$/.test(t) ? rangoPeriodo(t) : null);
+
+/** "2026-3T" → "3T 2026"; "2026-07" → "07-2026". Para nombres de fichero. */
+export function etiquetaPeriodo(p: string): string {
+  const t = /^(\d{4})-([1-4])T$/.exec(p);
+  if (t) return `${t[2]}T ${t[1]}`;
+  const [y, m] = p.split("-");
+  return `${m}-${y}`;
+}
+
+/** Fecha con la que la factura cae en un periodo: la contable si la hay. */
+export const fechaDelLibro = (f: { fecha: string | null; fecha_contable: string | null }) => f.fecha_contable ?? f.fecha;
+
 // ---------------------------------------------------------------------------
-// Carpeta del servidor → cliente. Estructura confirmada: raíz / oficina / cliente.
-// Aún no sabemos cómo se nombra la carpeta del cliente, así que se prueba por
-// código del despacho, por NIF y por nombre. Solo vale una coincidencia única:
-// ante la duda la factura entra sin cliente y un asesor la asigna.
+// Carpeta del servidor → cliente. Estructura real (capturas del despacho):
+//   LARAMARCOS_<OFICINA>/01. CLIENTES/<RAZÓN SOCIAL>/07. CONTABILIDAD/
+//     AÑO 2026/1º TRIMESTRE/<GASTOS|INGRESOS>/factura.pdf
+// La carpeta del cliente va por razón social, pero se prueba también por código
+// del despacho y por NIF. Solo vale una coincidencia única: ante la duda la
+// factura entra sin cliente y un asesor la asigna.
 // ---------------------------------------------------------------------------
 
 export interface ClienteCarpeta {
@@ -186,10 +345,10 @@ export function resolverClienteCarpeta(
   return unico(candidatos.filter((c) => claveNombre(c.razon_social) === soloNombre));
 }
 
-/** "2026", "3T", "T3", "2026-3T", "3º TRIMESTRE", "1er trimestre"…: carpetas de periodo, no de cliente. */
+/** "2026", "AÑO 2026", "3T", "2026-3T", "1º TRIMESTRE", "1er trimestre"…: carpetas de periodo, no de cliente. */
 export function esCarpetaDePeriodo(seg: string): boolean {
   const s = normalizaTexto(seg);
-  return /^(19|20)\d{2}$/.test(s) || /^((19|20)\d{2} ?)?([1-4] ?T|T ?[1-4]|[1-4] ?(ER|O|ST)? ?TRIM\w*)( ?(19|20)\d{2})?$/.test(s);
+  return /^(ANO )?(19|20)\d{2}$/.test(s) || /^((19|20)\d{2} ?)?([1-4] ?T|T ?[1-4]|[1-4] ?(ER|O|ST)? ?TRIM\w*)( ?(19|20)\d{2})?$/.test(s);
 }
 
 /**
@@ -203,12 +362,83 @@ export function resolverClienteRuta(
   clientes: ClienteCarpeta[],
   oficinas: readonly string[],
 ): ClienteCarpeta | null {
-  const esOficina = (s: string) => oficinas.some((o) => normalizaTexto(o) === normalizaTexto(s));
-  const oficina = carpetas.find(esOficina) ?? null;
-  for (const c of carpetas) {
-    if (esOficina(c) || esCarpetaDePeriodo(c)) continue;
+  const oficina = carpetas.map((c) => oficinaDeCarpeta(c, oficinas)).find(Boolean) ?? null;
+  // Con la estructura del servidor, el cliente es la carpeta que sigue a "01. CLIENTES".
+  const iClientes = carpetas.findIndex(esCarpetaClientes);
+  const orden = iClientes >= 0 && carpetas[iClientes + 1]
+    ? [carpetas[iClientes + 1], ...carpetas.filter((_, i) => i !== iClientes + 1)]
+    : carpetas;
+  for (const c of orden) {
+    if (oficinaDeCarpeta(c, oficinas) || esCarpetaDePeriodo(c) || esCarpetaClientes(c)) continue;
     const cliente = resolverClienteCarpeta(c, oficina, clientes);
     if (cliente) return cliente;
   }
   return null;
+}
+
+const sinEspacios = (s: string) => normalizaTexto(s).replace(/ /g, "");
+
+/** "LARAMARCOS_DONBENITO" o "Don Benito" → "Don Benito". */
+export function oficinaDeCarpeta(seg: string, oficinas: readonly string[]): string | null {
+  const s = sinEspacios(seg).replace(/^LARAMARCOS/, "");
+  return oficinas.find((o) => sinEspacios(o) === s) ?? null;
+}
+
+const esCarpetaClientes = (seg: string) => /^(\d+ )?CLIENTES$/.test(normalizaTexto(seg));
+
+/** GASTOS → gasto, INGRESOS → ingreso (la carpeta dice el libro). */
+export function tipoDeCarpetas(carpetas: string[]): TipoFactura | null {
+  for (const c of [...carpetas].reverse()) {
+    const s = normalizaTexto(c);
+    if (s === "GASTOS") return "gasto";
+    if (s === "INGRESOS") return "ingreso";
+  }
+  return null;
+}
+
+/** "AÑO 2026" + "1º TRIMESTRE" → "2026-1T". */
+export function trimestreDeCarpetas(carpetas: string[]): string | null {
+  let anio: string | null = null;
+  let trimestre: string | null = null;
+  for (const c of carpetas) {
+    const s = normalizaTexto(c);
+    anio = /^(?:ANO )?((?:19|20)\d{2})$/.exec(s)?.[1] ?? anio;
+    trimestre = /^([1-4]) ?(?:ER|O|ST)? ?TRIM/.exec(s)?.[1] ?? trimestre;
+  }
+  return anio && trimestre ? `${anio}-${trimestre}T` : null;
+}
+
+export interface RutaServidor {
+  oficina: string | null;
+  carpetaCliente: string | null;
+  tipo: TipoFactura | null;
+  /** Libro según la carpeta ("2026-1T"): manda sobre la fecha de la factura. */
+  trimestre: string | null;
+  /** Carpeta del trimestre, donde se deja el Excel ("…/AÑO 2026/1º TRIMESTRE"). */
+  carpetaTrimestre: string | null;
+}
+
+/** Descompone la ruta relativa de una factura en el servidor del despacho. */
+export function parsearRutaServidor(ruta: string, oficinas: readonly string[]): RutaServidor {
+  const carpetas = ruta.replace(/\\/g, "/").split("/").filter(Boolean).slice(0, -1);
+  const iClientes = carpetas.findIndex(esCarpetaClientes);
+  const iTrim = carpetas.findIndex((c) => /^[1-4] ?(?:ER|O|ST)? ?TRIM/.test(normalizaTexto(c)));
+  return {
+    oficina: carpetas.map((c) => oficinaDeCarpeta(c, oficinas)).find(Boolean) ?? null,
+    carpetaCliente: iClientes >= 0 ? carpetas[iClientes + 1] ?? null : null,
+    tipo: tipoDeCarpetas(carpetas),
+    trimestre: trimestreDeCarpetas(carpetas),
+    carpetaTrimestre: iTrim >= 0 ? carpetas.slice(0, iTrim + 1).join("/") : null,
+  };
+}
+
+/**
+ * Factura atrasada: si la carpeta dice un trimestre posterior al de su fecha,
+ * conserva su fecha y se contabiliza el primer día del trimestre de la carpeta.
+ */
+export function fechaContablePorCarpeta(fecha: string | null, trimestreCarpeta: string | null): string | null {
+  if (!fecha || !trimestreCarpeta) return null;
+  const rango = rangoPeriodo(trimestreCarpeta);
+  if (!rango) return null;
+  return fecha < rango.desde ? rango.desde : null;
 }

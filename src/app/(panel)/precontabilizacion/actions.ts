@@ -5,10 +5,14 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { OFICINAS } from "@/lib/types";
-import { resolverClienteRuta } from "@/lib/ocr/core";
+import {
+  avisosFactura, cuentaSegunRegimen, regimenDe, resolverClienteRuta, tipoDeCarpetas,
+  type LineaIva, type TipoFactura,
+} from "@/lib/ocr/core";
+import { codigosDe } from "@/lib/ocr/conceptos";
 import { MAX_BYTES_FACTURA, mimeFactura } from "@/lib/ocr/subida";
 import {
-  facturaPorHuella, huella, memorizarProveedor, registrarFactura, todosLosClientes,
+  facturaPorHuella, huella, memorizarCuentas, registrarFactura, todosLosClientes,
 } from "@/lib/ocr/registrar";
 
 // ---------------------------------------------------------------------------
@@ -35,29 +39,30 @@ async function clienteVisible(supabase: Awaited<ReturnType<typeof createClient>>
 }
 
 /**
- * "Detectar por carpeta": cliente de cada archivo a partir de su ruta
- * ("Don Benito/2034 - PÉREZ/…"), antes de subir nada. null = no detectado, y
- * ese archivo no se sube. Solo entre los clientes que el usuario puede ver.
+ * "Detectar por carpeta": cliente y libro (GASTOS/INGRESOS) de cada archivo a
+ * partir de su ruta ("LARAMARCOS_BADAJOZ/01. CLIENTES/KANTARADS…/GASTOS/f.pdf"),
+ * antes de subir nada. Lo no detectado no se sube. Solo entre los clientes que
+ * el usuario puede ver.
  */
 export async function detectarClientesAction(
   rutas: (string | null)[],
-): Promise<({ id: string; razon_social: string } | null)[]> {
+): Promise<{ cliente: { id: string; razon_social: string } | null; libro: TipoFactura | null }[]> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return rutas.map(() => null);
+  if (!user) return rutas.map(() => ({ cliente: null, libro: null }));
   const clientes = await todosLosClientes(supabase);
   return rutas.map((ruta) => {
-    if (!ruta) return null;
+    if (!ruta) return { cliente: null, libro: null };
     const carpetas = ruta.replace(/\\/g, "/").split("/").slice(0, -1);
     const c = resolverClienteRuta(carpetas, clientes, OFICINAS);
-    return c ? { id: c.id, razon_social: c.razon_social } : null;
+    return { cliente: c ? { id: c.id, razon_social: c.razon_social } : null, libro: tipoDeCarpetas(carpetas) };
   });
 }
 
 /** Paso 1: URL firmada para subir un fichero a la carpeta del usuario en Storage. */
 export async function prepararSubidaAction(
   nombre: string,
-  tipo: string,
+  mimeNavegador: string,
   tamano: number,
   cliente_id: string | null,
 ): Promise<{ path: string; token: string } | { error: string }> {
@@ -65,7 +70,7 @@ export async function prepararSubidaAction(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Sesión caducada. Vuelve a entrar." };
   if (!(await clienteVisible(supabase, cliente_id))) return { error: SIN_CLIENTE };
-  if (!mimeFactura(nombre, tipo)) return { error: "Solo PDF o imagen (JPG, PNG, WEBP)." };
+  if (!mimeFactura(nombre, mimeNavegador)) return { error: "Solo PDF o imagen (JPG, PNG, WEBP)." };
   if (tamano > MAX_BYTES_FACTURA) return { error: "Demasiado grande (máx. 20 MB)." };
 
   const seguro = nombre.replace(/[^\w.\-]/g, "_").slice(-120);
@@ -75,13 +80,14 @@ export async function prepararSubidaAction(
   return { path: data.path, token: data.token };
 }
 
-/** Paso 2: lee con IA el fichero ya subido y lo registra en su cliente. */
+/** Paso 2: lee con IA el fichero ya subido y lo registra en su cliente y su libro. */
 export async function procesarSubidaAction(e: {
   path: string;
   nombre: string;
-  tipo: string;
+  mimeNavegador: string;
   rutaRelativa: string | null;
   cliente_id: string;
+  libro: TipoFactura;
 }): Promise<ResultadoSubida> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -93,7 +99,8 @@ export async function procesarSubidaAction(e: {
     await admin.storage.from("facturas").remove([e.path]);
     return { estado: "error", mensaje: SIN_CLIENTE };
   }
-  const mime = mimeFactura(e.nombre, e.tipo);
+  if (e.libro !== "gasto" && e.libro !== "ingreso") return { estado: "error", mensaje: "Elige gastos o ingresos." };
+  const mime = mimeFactura(e.nombre, e.mimeNavegador);
   if (!mime) return { estado: "error", mensaje: "Solo PDF o imagen." };
 
   const { data: blob, error } = await admin.storage.from("facturas").download(e.path);
@@ -112,6 +119,7 @@ export async function procesarSubidaAction(e: {
       base64: buffer.toString("base64"),
       mime,
       cliente_id: e.cliente_id,
+      tipo: e.libro,
       archivo_nombre: e.rutaRelativa ?? e.nombre,
       archivo_path: e.path,
       archivo_hash: hash,
@@ -135,7 +143,17 @@ export async function refrescarPrecontabilizacionAction() {
   revalidatePath("/precontabilizacion");
 }
 
-// UC-405: corrección manual con aprendizaje (la subcuenta se memoriza por proveedor).
+/** Líneas de IVA del formulario de revisión (linea_base_0, linea_tipo_0, linea_cuota_0…). */
+function lineasDelFormulario(formData: FormData, num: (k: string) => number | null): LineaIva[] {
+  const lineas: LineaIva[] = [];
+  for (let i = 0; i < 4; i++) {
+    const l = { base: num(`linea_base_${i}`), tipo: num(`linea_tipo_${i}`), cuota: num(`linea_cuota_${i}`) };
+    if (l.base != null || l.cuota != null) lineas.push(l);
+  }
+  return lineas;
+}
+
+// UC-405: corrección manual con aprendizaje (las cuentas se memorizan por cliente y proveedor).
 export async function corregirFacturaAction(id: string, formData: FormData) {
   const supabase = await createClient();
   const texto = (k: string) => String(formData.get(k) ?? "").trim() || null;
@@ -143,42 +161,65 @@ export async function corregirFacturaAction(id: string, formData: FormData) {
     const v = String(formData.get(k) ?? "").replace(",", ".").trim();
     return v === "" ? null : Number(v);
   };
-  const proveedor_cif = texto("proveedor_cif")?.toUpperCase() ?? null;
-  const proveedor_nombre = texto("proveedor_nombre");
-  const subcuenta = texto("subcuenta");
-  const iva_tipo = num("iva_tipo");
   // Sin cliente la factura no sale en ningún Excel: no se puede dar por revisada.
   const cliente_id = texto("cliente_id");
   if (!(await clienteVisible(supabase, cliente_id))) redirect(`/precontabilizacion/${id}?error=cliente`);
+  const { data: cliente } = await supabase.from("clientes").select("cif, regimen_contable").eq("id", cliente_id!).single();
+  const regimen = regimenDe(cliente?.cif, cliente?.regimen_contable);
 
-  const { data: actualizada } = await supabase.from("facturas_ocr").update({
-    cliente_id,
+  const tipo: TipoFactura = texto("tipo") === "ingreso" ? "ingreso" : "gasto";
+  const proveedor_cif = texto("proveedor_cif")?.replace(/[\s.-]/g, "").toUpperCase() ?? null;
+  const proveedor_nombre = texto("proveedor_nombre");
+  // 627 → 62700000 en sociedades; en autónomos, el código tal cual si está en el listado.
+  const escrita = texto("subcuenta");
+  const subcuenta = cuentaSegunRegimen(escrita, regimen, codigosDe(tipo)) ?? escrita;
+  const subcuenta_tercero = regimen === "partida_doble" ? texto("subcuenta_tercero")?.replace(/\D/g, "") || null : null;
+  const lineas = lineasDelFormulario(formData, num);
+  const suma = (k: "base" | "cuota") =>
+    lineas.some((l) => l[k] != null) ? Math.round(lineas.reduce((s, l) => s + (l[k] ?? 0), 0) * 100) / 100 : null;
+
+  const datos = {
+    tipo,
     fecha: texto("fecha"),
+    fecha_contable: texto("fecha_contable"),
     numero_factura: texto("numero_factura"),
     proveedor_nombre,
     proveedor_cif,
     concepto: texto("concepto"),
-    base_imponible: num("base_imponible"),
-    iva_tipo,
-    iva_cuota: num("iva_cuota"),
+    base_imponible: suma("base"),
+    iva_tipo: lineas.length === 1 ? lineas[0].tipo : null,
+    iva_cuota: suma("cuota"),
+    lineas_iva: lineas.length > 1 ? lineas : [],
     retencion_base: num("retencion_base"),
     retencion_tipo: num("retencion_tipo"),
     retencion_cuota: num("retencion_cuota"),
     total: num("total"),
     subcuenta,
+    subcuenta_tercero,
+    sujeto_pasivo: formData.get("sujeto_pasivo") === "on",
     // La corrección del asesor sustituye a la sugerencia de la IA.
-    subcuenta_origen: subcuenta ? "manual" : null,
+    subcuenta_origen: subcuenta ? ("manual" as const) : null,
     subcuenta_motivo: subcuenta ? "Corregida manualmente por el asesor." : null,
+  };
+
+  const { data: actualizada } = await supabase.from("facturas_ocr").update({
+    ...datos,
+    cliente_id,
+    // Se guardan para que se vean, pero el asesor ya la ha dado por buena.
+    avisos: avisosFactura(datos, regimen),
     confianza: 100,
     revisada: true,
   }).eq("id", id).select("id");
 
-  // AC-10: aprende la subcuenta del proveedor para futuras facturas. Solo si el
-  // asesor podía editar esta factura (RLS): si no, el update no tocó ninguna fila.
+  // AC-10: aprende las cuentas para futuras facturas de este proveedor en este
+  // cliente. Solo si el asesor podía editar esta factura (RLS).
   if (actualizada?.length) {
-    await memorizarProveedor(
+    await memorizarCuentas(
       createAdminClient(),
-      { cif: proveedor_cif, nombre: proveedor_nombre, subcuenta, iva_tipo },
+      {
+        cliente_id, tipo, nif: proveedor_cif, nombre: proveedor_nombre,
+        subcuenta, subcuenta_tercero, iva_tipo: datos.iva_tipo,
+      },
       { sobrescribir: true },
     );
   }
@@ -194,14 +235,17 @@ export async function aprobarFacturaAction(id: string) {
     .update({ revisada: true })
     .eq("id", id)
     .not("cliente_id", "is", null) // sin cliente se aprueba desde "Revisar", eligiéndolo
-    .select("proveedor_cif, proveedor_nombre, subcuenta, iva_tipo")
+    .select("cliente_id, tipo, proveedor_cif, proveedor_nombre, subcuenta, subcuenta_tercero, iva_tipo")
     .maybeSingle();
-  // Aprobar confirma lo leído: un proveedor nuevo queda memorizado, pero no se
-  // pisa la subcuenta habitual de uno conocido.
+  // Aprobar confirma lo leído: un proveedor nuevo queda memorizado en el cliente,
+  // pero no se pisa lo que ya había.
   if (f) {
-    await memorizarProveedor(
+    await memorizarCuentas(
       createAdminClient(),
-      { cif: f.proveedor_cif, nombre: f.proveedor_nombre, subcuenta: f.subcuenta, iva_tipo: f.iva_tipo },
+      {
+        cliente_id: f.cliente_id, tipo: f.tipo, nif: f.proveedor_cif, nombre: f.proveedor_nombre,
+        subcuenta: f.subcuenta, subcuenta_tercero: f.subcuenta_tercero, iva_tipo: f.iva_tipo,
+      },
       { sobrescribir: false },
     );
   }

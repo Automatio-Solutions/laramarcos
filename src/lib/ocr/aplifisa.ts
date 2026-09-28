@@ -2,7 +2,7 @@
 // Hoja 1 "Libro de Facturas": solo lo que se puede importar (revisado o verde).
 // Hoja 2 "Pendientes de revisar": lo que falta, para que se vea que el trimestre no está completo.
 import ExcelJS from "exceljs";
-import { COLUMNAS_APLIFISA, esExportable, filaAplifisa, semaforo, type FacturaDatos } from "./core";
+import { COLUMNAS_APLIFISA, esExportable, fechaDelLibro, filasAplifisa, semaforo, type FacturaDatos } from "./core";
 
 export interface FacturaExcel extends FacturaDatos {
   revisada: boolean;
@@ -10,10 +10,14 @@ export interface FacturaExcel extends FacturaDatos {
   archivo_nombre: string | null;
 }
 
-// Anchos y formatos copiados del modelo.
-const ANCHOS = [14, 16, 30, 14, 18, 16, 10, 14, 16, 16, 16, 16];
+// Anchos y formatos copiados del modelo (+ "Subcuenta Gasto/Ingreso" y "Sujeto Pasivo").
+// Los porcentajes van como 21 con dos decimales, como los escribe el despacho.
+const ANCHOS = [14, 16, 30, 14, 14, 22, 16, 10, 14, 16, 12, 16, 16, 14];
 const EUR = "#,##0.00 _€";
-const FORMATOS = ["dd/mm/yyyy", "@", "@", "@", "@", EUR, "0%", EUR, EUR, "0%", EUR, EUR];
+const PCT = "0.00";
+const FORMATOS = ["dd/mm/yyyy", "@", "@", "@", "@", "@", EUR, PCT, EUR, EUR, PCT, EUR, EUR, "@"];
+/** Columnas que vienen de la factura (azul en el modelo); el resto, calculadas (negro). */
+const DE_ENTRADA = new Set([0, 1, 2, 3, 4, 5, 6, 7, 13]);
 const NARANJA = "FFFFC000";
 const AZUL = "FF0000FF";
 
@@ -28,24 +32,27 @@ function hojaLibro(wb: ExcelJS.Workbook, nombre: string, facturas: FacturaExcel[
   extra.forEach((_, i) => (ws.getColumn(ANCHOS.length + i + 1).width = 18));
 
   for (const f of facturas) {
-    const fila = ws.addRow([
-      ...filaAplifisa(f),
-      ...(extra.length ? [`${semaforo(f.confianza)} (${f.confianza}%)`, f.archivo_nombre ?? ""] : []),
-    ]);
-    FORMATOS.forEach((fmt, i) => {
-      const c = fila.getCell(i + 1);
-      c.numFmt = fmt;
-      // Como en el modelo: azul lo que viene de la factura, negro lo calculado.
-      c.font = { color: { argb: i <= 6 ? AZUL : "FF000000" } };
-    });
+    // Una fila por tipo de IVA.
+    for (const celdas of filasAplifisa(f)) {
+      const fila = ws.addRow([
+        ...celdas,
+        ...(extra.length ? [`${semaforo(f.confianza)} (${f.confianza}%)`, f.archivo_nombre ?? ""] : []),
+      ]);
+      FORMATOS.forEach((fmt, i) => {
+        const c = fila.getCell(i + 1);
+        c.numFmt = fmt;
+        c.font = { color: { argb: DE_ENTRADA.has(i) ? AZUL : "FF000000" } };
+      });
+    }
   }
   const ultimaCol = String.fromCharCode(64 + COLUMNAS_APLIFISA.length + extra.length);
   ws.autoFilter = `A1:${ultimaCol}${Math.max(ws.rowCount, 2)}`;
 }
 
-/** Libro de facturas de un cliente/periodo, ordenado por fecha de expedición. */
+/** Libro de facturas de un cliente/tipo/periodo, ordenado por fecha. */
 export async function generarExcelAplifisa(facturas: FacturaExcel[]): Promise<Buffer> {
-  const porFecha = [...facturas].sort((a, b) => (a.fecha ?? "9999").localeCompare(b.fecha ?? "9999"));
+  const clave = (f: FacturaExcel) => fechaDelLibro(f) ?? "9999";
+  const porFecha = [...facturas].sort((a, b) => clave(a).localeCompare(clave(b)));
   const wb = new ExcelJS.Workbook();
   wb.creator = "LaraMarcos Asesores";
   hojaLibro(wb, "Libro de Facturas", porFecha.filter(esExportable));
