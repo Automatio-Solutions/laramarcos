@@ -93,14 +93,14 @@ export default async function PrecontabilizacionPage() {
                 <tr key={f.id} className="border-t border-border hover:bg-surface-raised">
                   <td className="px-4 py-2.5"><span className={`inline-block h-2.5 w-2.5 rounded-full ${s === "verde" ? "bg-success" : s === "naranja" ? "bg-warning" : "bg-error"}`} /></td>
                   <td className="px-4 py-2.5 text-fg">{f.proveedor_nombre ?? <span className="text-fg-muted">{f.archivo_nombre}</span>}</td>
-                  <td className="px-4 py-2.5 text-fg-muted">{f.cliente?.razon_social ?? "—"}</td>
+                  <td className="px-4 py-2.5 text-fg-muted">{f.cliente?.razon_social ?? <span className="text-error">Sin cliente</span>}</td>
                   <td className="px-4 py-2.5 text-right text-fg">{f.base_imponible != null ? eur.format(f.base_imponible) : "—"}</td>
                   <td className="px-4 py-2.5 font-mono text-xs text-fg-muted">{f.subcuenta ?? "—"}</td>
                   <td className="px-4 py-2.5 text-right"><span className={`rounded px-1.5 py-0.5 text-xs ${COLOR[s]}`}>{f.confianza}%</span></td>
                   <td className="px-4 py-2.5 text-right">
                     <div className="flex justify-end gap-2">
                       <Link href={`/precontabilizacion/${f.id}`} className="text-xs font-medium text-accent hover:underline">Revisar</Link>
-                      {!f.revisada && s === "verde" && (
+                      {!f.revisada && s === "verde" && f.cliente && (
                         <form action={aprobarFacturaAction.bind(null, f.id)}><button className="text-xs text-success hover:underline">Aprobar</button></form>
                       )}
                     </div>
