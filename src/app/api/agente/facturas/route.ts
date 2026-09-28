@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { autorizadoAgente, noAutorizado } from "@/lib/agente/auth";
-import { resolverClienteCarpeta, trimestreDe } from "@/lib/ocr/core";
+import { OFICINAS } from "@/lib/types";
+import { parsearRutaServidor, resolverClienteCarpeta, trimestreDe } from "@/lib/ocr/core";
 import { facturaPorHuella, huella, registrarFactura, todosLosClientes } from "@/lib/ocr/registrar";
 
 // Leer una factura con Claude tarda 10–30 s: el programa manda una por petición.
@@ -12,8 +13,12 @@ const MIMES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "imag
  * UC-401 (servidor del despacho): el programa manda una factura nueva que ha
  * encontrado en la carpeta de un cliente. Multipart con:
  *   - archivo: el fichero (PDF/JPG/PNG), máx. ~4 MB (límite de Vercel)
- *   - ruta:    ruta relativa en el servidor, "Oficina/Carpeta cliente/…/factura.pdf"
- * El fichero NO se guarda aquí: se queda en el servidor. Solo su ruta y su huella.
+ *   - ruta:    ruta relativa a DocumentacionLM, p. ej.
+ *              "LARAMARCOS_BADAJOZ/01. CLIENTES/KANTARADS DIGITAL, S.L./07. CONTABILIDAD/
+ *               AÑO 2026/1º TRIMESTRE/GASTOS/factura.pdf"
+ * De la ruta salen la oficina, el cliente, el libro (GASTOS/INGRESOS) y el
+ * trimestre en el que se contabiliza. El fichero NO se guarda aquí: se queda en
+ * el servidor. Solo su ruta y su huella.
  * Idempotente por huella: reenviar la misma factura devuelve la ya registrada.
  */
 export async function POST(request: Request) {
@@ -37,17 +42,21 @@ export async function POST(request: Request) {
   const previa = await facturaPorHuella(admin, hash);
   if (previa) return Response.json({ duplicada: true, id: previa.id, cliente_id: previa.cliente_id });
 
-  // Estructura del servidor: Oficina / Cliente / …
-  const [oficina, carpetaCliente] = ruta.split("/");
-  const cliente = carpetaCliente
-    ? resolverClienteCarpeta(carpetaCliente, oficina ?? null, await todosLosClientes(admin))
+  const r = parsearRutaServidor(ruta, OFICINAS);
+  if (!r.tipo) {
+    return Response.json({ error: "La factura no está en una carpeta GASTOS o INGRESOS." }, { status: 422 });
+  }
+  const cliente = r.carpetaCliente
+    ? resolverClienteCarpeta(r.carpetaCliente, r.oficina, await todosLosClientes(admin))
     : null;
 
   try {
-    const r = await registrarFactura(admin, admin, {
+    const reg = await registrarFactura(admin, admin, {
       base64: buffer.toString("base64"),
       mime,
       cliente_id: cliente?.id ?? null,
+      tipo: r.tipo,
+      trimestreCarpeta: r.trimestre,
       archivo_nombre: archivo.name,
       ruta_servidor: ruta,
       archivo_hash: hash,
@@ -55,10 +64,11 @@ export async function POST(request: Request) {
     });
     return Response.json({
       duplicada: false,
-      id: r.id,
+      id: reg.id,
       cliente_id: cliente?.id ?? null,
-      semaforo: r.semaforo,
-      trimestre: r.fecha ? trimestreDe(r.fecha) : null,
+      tipo: r.tipo,
+      semaforo: reg.semaforo,
+      trimestre: r.trimestre ?? (reg.fecha ? trimestreDe(reg.fecha) : null),
     });
   } catch (e) {
     // Dos envíos simultáneos de la misma factura: el índice único frena el segundo.
