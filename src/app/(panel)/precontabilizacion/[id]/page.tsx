@@ -16,6 +16,7 @@ interface Factura {
   retencion_cuota: number | null; total: number | null; subcuenta: string | null; subcuenta_tercero: string | null;
   sujeto_pasivo: boolean; subcuenta_motivo: string | null; subcuenta_origen: "historico" | "ia" | "manual" | null;
   avisos: Aviso[]; confianza: number; archivo_nombre: string | null; ruta_servidor: string | null;
+  pagina_desde: number | null; pagina_hasta: number | null;
 }
 
 const ORIGEN_LABEL: Record<string, string> = {
@@ -62,7 +63,10 @@ export default async function RevisarFacturaPage({
       <header>
         <Link href="/precontabilizacion" className="text-sm text-fg-muted hover:underline">← Precontabilización</Link>
         <h1 className="mt-1 text-2xl font-bold text-primary">Revisar factura</h1>
-        <p className="text-sm text-fg-muted">{f.ruta_servidor ?? f.archivo_nombre} · confianza {f.confianza}%</p>
+        <p className="text-sm text-fg-muted">
+          {f.ruta_servidor ?? f.archivo_nombre}
+          {f.ruta_servidor && f.pagina_desde ? ` · págs. ${f.pagina_desde}-${f.pagina_hasta}` : ""} · confianza {f.confianza}%
+        </p>
       </header>
 
       {avisos.length > 0 && (

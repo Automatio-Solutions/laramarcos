@@ -7,13 +7,14 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { OFICINAS } from "@/lib/types";
 import {
   avisosFactura, cuentaSegunRegimen, regimenDe, resolverClienteRuta, tipoDeCarpetas,
-  type LineaIva, type TipoFactura,
+  type InfoPagina, type LineaIva, type TipoFactura,
 } from "@/lib/ocr/core";
+import { contarPaginas, describirPaginas, extraerPaginas, PAGINAS_POR_TANDA } from "@/lib/ocr/separar";
 import { codigosDe } from "@/lib/ocr/conceptos";
 import { actualizarAvisoPendientes } from "@/lib/ocr/avisos";
-import { MAX_BYTES_FACTURA, mimeFactura } from "@/lib/ocr/subida";
+import { MAX_BYTES_FACTURA, MAX_MB_FACTURA, mimeFactura } from "@/lib/ocr/subida";
 import {
-  facturaPorHuella, huella, memorizarCuentas, registrarFactura, todosLosClientes,
+  facturaDuplicada, facturaPorHuella, huella, huellaPaginas, memorizarCuentas, registrarFactura, todosLosClientes,
 } from "@/lib/ocr/registrar";
 
 // ---------------------------------------------------------------------------
@@ -72,7 +73,7 @@ export async function prepararSubidaAction(
   if (!user) return { error: "Sesión caducada. Vuelve a entrar." };
   if (!(await clienteVisible(supabase, cliente_id))) return { error: SIN_CLIENTE };
   if (!mimeFactura(nombre, mimeNavegador)) return { error: "Solo PDF o imagen (JPG, PNG, WEBP)." };
-  if (tamano > MAX_BYTES_FACTURA) return { error: "Demasiado grande (máx. 20 MB)." };
+  if (tamano > MAX_BYTES_FACTURA) return { error: `Demasiado grande (máx. ${MAX_MB_FACTURA} MB).` };
 
   const seguro = nombre.replace(/[^\w.\-]/g, "_").slice(-120);
   const path = `${user.id}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}-${seguro}`;
@@ -81,7 +82,45 @@ export async function prepararSubidaAction(
   return { path: data.path, token: data.token };
 }
 
-/** Paso 2: lee con IA el fichero ya subido y lo registra en su cliente y su libro. */
+/** Descarga un fichero subido por el propio usuario (solo de su carpeta). */
+async function descargarPropio(path: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Sesión caducada. Vuelve a entrar." } as const;
+  if (!path.startsWith(`${user.id}/`)) return { error: "Ruta no válida." } as const;
+  const admin = createAdminClient();
+  const { data: blob, error } = await admin.storage.from("facturas").download(path);
+  if (error || !blob) return { error: "No se encontró el fichero subido." } as const;
+  return { supabase, admin, user, pdf: new Uint8Array(await blob.arrayBuffer()) } as const;
+}
+
+/** PDF subido: cuántas páginas tiene (más de una puede traer varias facturas). */
+export async function contarPaginasAction(path: string): Promise<{ paginas: number } | { error: string }> {
+  const r = await descargarPropio(path);
+  if ("error" in r) return { error: r.error! };
+  try {
+    return { paginas: await contarPaginas(r.pdf) };
+  } catch {
+    return { error: "El PDF está dañado o protegido y no se puede abrir." };
+  }
+}
+
+/** Describe una tanda de páginas (máx. PAGINAS_POR_TANDA) para saber dónde empieza cada factura. */
+export async function describirPaginasAction(path: string, desde: number, hasta: number): Promise<InfoPagina[] | { error: string }> {
+  if (hasta - desde + 1 > PAGINAS_POR_TANDA) return { error: "Demasiadas páginas de una vez." };
+  const r = await descargarPropio(path);
+  if ("error" in r) return { error: r.error! };
+  try {
+    return await describirPaginas(r.pdf, desde, hasta);
+  } catch (e) {
+    return { error: `No se pudo separar el PDF: ${(e as Error).message}` };
+  }
+}
+
+/**
+ * Paso 2: lee con IA el fichero ya subido y lo registra en su cliente y su libro.
+ * Con `paginas`, es una factura dentro de un PDF con varias: se lee solo ese trozo.
+ */
 export async function procesarSubidaAction(e: {
   path: string;
   nombre: string;
@@ -89,6 +128,7 @@ export async function procesarSubidaAction(e: {
   rutaRelativa: string | null;
   cliente_id: string;
   libro: TipoFactura;
+  paginas?: { desde: number; hasta: number; dudoso: boolean; numero_factura: string | null; nif_emisor: string | null } | null;
 }): Promise<ResultadoSubida> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -96,43 +136,69 @@ export async function procesarSubidaAction(e: {
   // Solo se procesan ficheros de la carpeta del propio usuario.
   if (!e.path.startsWith(`${user.id}/`)) return { estado: "error", mensaje: "Ruta no válida." };
   const admin = createAdminClient();
+  // El fichero de un PDF con varias facturas lo comparten todas: no se borra por una.
+  const borrar = () => (e.paginas ? Promise.resolve() : admin.storage.from("facturas").remove([e.path]));
   if (!(await clienteVisible(supabase, e.cliente_id))) {
-    await admin.storage.from("facturas").remove([e.path]);
+    await borrar();
     return { estado: "error", mensaje: SIN_CLIENTE };
   }
   if (e.libro !== "gasto" && e.libro !== "ingreso") return { estado: "error", mensaje: "Elige gastos o ingresos." };
   const mime = mimeFactura(e.nombre, e.mimeNavegador);
   if (!mime) return { estado: "error", mensaje: "Solo PDF o imagen." };
 
+  // En gastos, el emisor es el proveedor: si la separación ya vio su NIF y el nº
+  // de factura y esa factura existe, ni se descarga ni se lee (no se paga dos veces).
+  if (e.paginas && e.libro === "gasto") {
+    const previa = await facturaDuplicada(admin, {
+      cliente_id: e.cliente_id, tipo: e.libro, proveedor_cif: e.paginas.nif_emisor, numero_factura: e.paginas.numero_factura,
+    });
+    if (previa) return { estado: "duplicada", id: previa };
+  }
+
   const { data: blob, error } = await admin.storage.from("facturas").download(e.path);
   if (error || !blob) return { estado: "error", mensaje: "No se encontró el fichero subido." };
-  const buffer = Buffer.from(await blob.arrayBuffer());
-  const hash = huella(buffer);
+  const completo = Buffer.from(await blob.arrayBuffer());
+  let buffer: Buffer = completo;
+  let hash = huella(completo);
+  if (e.paginas) {
+    try {
+      buffer = await extraerPaginas(completo, e.paginas.desde, e.paginas.hasta);
+    } catch (err) {
+      return { estado: "error", mensaje: (err as Error).message };
+    }
+    hash = huellaPaginas(hash, e.paginas.desde, e.paginas.hasta);
+  }
 
   const previa = await facturaPorHuella(admin, hash);
   if (previa) {
-    await admin.storage.from("facturas").remove([e.path]);
+    await borrar();
     return { estado: "duplicada", id: previa.id };
   }
 
+  const nombre = e.rutaRelativa ?? e.nombre;
   try {
     const r = await registrarFactura(supabase, admin, {
       base64: buffer.toString("base64"),
       mime,
       cliente_id: e.cliente_id,
       tipo: e.libro,
-      archivo_nombre: e.rutaRelativa ?? e.nombre,
+      archivo_nombre: e.paginas ? `${nombre} · págs. ${e.paginas.desde}-${e.paginas.hasta}` : nombre,
       archivo_path: e.path,
       archivo_hash: hash,
       origen: "app",
       subido_por: user.id,
+      paginas: e.paginas ? { desde: e.paginas.desde, hasta: e.paginas.hasta, dudoso: e.paginas.dudoso } : null,
     });
+    if (r.duplicada) {
+      await borrar();
+      return { estado: "duplicada", id: r.id };
+    }
     return { estado: "ok", id: r.id, semaforo: r.semaforo };
   } catch (err) {
     // La misma factura en dos envíos simultáneos: el índice único frena el segundo.
     const ganadora = await facturaPorHuella(admin, hash);
     if (ganadora) {
-      await admin.storage.from("facturas").remove([e.path]);
+      await borrar();
       return { estado: "duplicada", id: ganadora.id };
     }
     return { estado: "error", mensaje: (err as Error).message };

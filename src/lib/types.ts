@@ -12,6 +12,9 @@ export const ROL_LABEL: Record<Rol, string> = {
 export const OFICINAS = ["Badajoz", "Castuera", "Don Benito", "Orellana"] as const;
 export type Oficina = (typeof OFICINAS)[number];
 
+/** Sociedades → partida doble (subcuentas); autónomos → programa fiscal (código de concepto). */
+export type RegimenContable = "partida_doble" | "fiscal";
+
 export interface Sector {
   id: string;
   nombre: string;
@@ -52,6 +55,8 @@ export interface Cliente {
   asesor_id: string | null;
   oficina: Oficina | null;
   carpeta_url: string | null;   // carpeta del cliente en el servidor del despacho
+  /** Cómo se lleva su contabilidad (M4). null = se deduce del NIF. */
+  regimen_contable: RegimenContable | null;
   fecha_baja: string | null;    // fecha en que dejó el servicio (null = activo)
   activo: boolean;
   created_at: string;
@@ -228,6 +233,7 @@ export interface ClienteInput {
   asesor_id?: string | null;
   oficina?: Oficina | null;
   carpeta_url?: string;
+  regimen_contable?: RegimenContable | null;
   fecha_baja?: string;
   cuentas: CuentaInput[];
   sector_ids: string[];

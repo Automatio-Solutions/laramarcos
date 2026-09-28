@@ -2,7 +2,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { autorizadoAgente, noAutorizado } from "@/lib/agente/auth";
 import { OFICINAS } from "@/lib/types";
 import { parsearRutaServidor, resolverClienteCarpeta, trimestreDe } from "@/lib/ocr/core";
-import { facturaPorHuella, huella, registrarFactura, todosLosClientes } from "@/lib/ocr/registrar";
+import {
+  facturaDuplicada, facturaPorHuella, huella, huellaPaginas, registrarFactura, todosLosClientes,
+} from "@/lib/ocr/registrar";
 
 // Leer una factura con Claude tarda 10–30 s: el programa manda una por petición.
 export const maxDuration = 60;
@@ -19,6 +21,11 @@ const MIMES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "imag
  * De la ruta salen la oficina, el cliente, el libro (GASTOS/INGRESOS) y el
  * trimestre en el que se contabiliza. El fichero NO se guarda aquí: se queda en
  * el servidor. Solo su ruta y su huella.
+ * Factura sacada de un PDF con varias (el programa la extrae y la manda sola):
+ *   - hash_origen:  sha256 del PDF completo
+ *   - pagina_desde, pagina_hasta: sus páginas en él
+ *   - corte_dudoso: "1" si la separación no estaba clara
+ *   - numero_factura, nif_emisor: lo que vio la separación (evita releer duplicadas)
  * Idempotente por huella: reenviar la misma factura devuelve la ya registrada.
  */
 export async function POST(request: Request) {
@@ -36,7 +43,13 @@ export async function POST(request: Request) {
   }
 
   const buffer = Buffer.from(await archivo.arrayBuffer());
-  const hash = huella(buffer);
+  const hashOrigen = String(form?.get("hash_origen") ?? "").trim();
+  const desde = Number(form?.get("pagina_desde"));
+  const hasta = Number(form?.get("pagina_hasta"));
+  const paginas = /^[0-9a-f]{64}$/.test(hashOrigen) && Number.isInteger(desde) && Number.isInteger(hasta) && desde >= 1 && hasta >= desde
+    ? { desde, hasta, dudoso: form?.get("corte_dudoso") === "1" }
+    : null;
+  const hash = paginas ? huellaPaginas(hashOrigen, desde, hasta) : huella(buffer);
   const admin = createAdminClient();
 
   const previa = await facturaPorHuella(admin, hash);
@@ -50,6 +63,17 @@ export async function POST(request: Request) {
     ? resolverClienteCarpeta(r.carpetaCliente, r.oficina, await todosLosClientes(admin))
     : null;
 
+  // En gastos el emisor es el proveedor: si la separación ya vio NIF y nº y esa
+  // factura existe, no se vuelve a leer (el PDF del trimestre reenviado con más).
+  if (paginas && r.tipo === "gasto" && cliente) {
+    const ya = await facturaDuplicada(admin, {
+      cliente_id: cliente.id, tipo: "gasto",
+      proveedor_cif: String(form?.get("nif_emisor") ?? "").trim() || null,
+      numero_factura: String(form?.get("numero_factura") ?? "").trim() || null,
+    });
+    if (ya) return Response.json({ duplicada: true, id: ya, cliente_id: cliente.id });
+  }
+
   try {
     const reg = await registrarFactura(admin, admin, {
       base64: buffer.toString("base64"),
@@ -61,7 +85,9 @@ export async function POST(request: Request) {
       ruta_servidor: ruta,
       archivo_hash: hash,
       origen: "servidor",
+      paginas,
     });
+    if (reg.duplicada) return Response.json({ duplicada: true, id: reg.id, cliente_id: cliente?.id ?? null });
     return Response.json({
       duplicada: false,
       id: reg.id,

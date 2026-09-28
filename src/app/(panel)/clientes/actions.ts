@@ -80,6 +80,7 @@ function parseForm(formData: FormData): ClienteInput {
     asesor_id: (String(formData.get("asesor_id") ?? "").trim() || null) as string | null,
     oficina: (String(formData.get("oficina") ?? "").trim() || null) as Oficina | null,
     carpeta_url: String(formData.get("carpeta_url") ?? "").trim() || undefined,
+    regimen_contable: ((r) => (r === "partida_doble" || r === "fiscal" ? r : null))(String(formData.get("regimen_contable") ?? "")),
     fecha_baja: String(formData.get("fecha_baja") ?? "").trim() || undefined,
     cuentas,
     sector_ids: formData.getAll("sector_ids").map(String).filter(Boolean),
@@ -116,6 +117,7 @@ async function persist(
     asesor_id: asesorId,
     oficina: input.oficina ?? null,
     carpeta_url: input.carpeta_url ?? null,
+    regimen_contable: input.regimen_contable ?? null,
     fecha_baja: fechaBaja,
     activo: !fechaBaja,
   };

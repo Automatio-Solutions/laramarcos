@@ -196,6 +196,23 @@ export function ClienteForm({
         </label>
       </div>
 
+      {/* M4: decide qué va en las columnas de cuentas del Excel de Aplifisa. */}
+      <label className="block space-y-1">
+        <span className="text-sm font-medium text-fg">Contabilidad (precontabilización)</span>
+        <select
+          name="regimen_contable"
+          defaultValue={cliente?.regimen_contable ?? ""}
+          className="w-full rounded-md border border-border bg-surface px-3 py-2 text-fg outline-none focus:border-primary sm:w-96"
+        >
+          <option value="">Automático según el NIF (sociedad → partida doble, autónomo → fiscal)</option>
+          <option value="partida_doble">Partida doble (sociedad): subcuentas de 8 dígitos</option>
+          <option value="fiscal">Programa fiscal (autónomo): código de concepto</option>
+        </select>
+        <span className="block text-xs text-fg-muted">
+          Solo hace falta cambiarlo en casos especiales, p. ej. una comunidad de bienes que se lleve por partida doble.
+        </span>
+      </label>
+
       <Field
         label="Carpeta del cliente en el servidor"
         name="carpeta_url"

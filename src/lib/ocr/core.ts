@@ -204,7 +204,7 @@ export function cuentaSegunRegimen(
 // ---------------------------------------------------------------------------
 
 export interface Aviso {
-  codigo: "cuadre" | "sin_numero" | "sin_fecha" | "sin_nif" | "sin_subcuenta_tercero" | "sin_subcuenta" | "libro";
+  codigo: "cuadre" | "sin_numero" | "sin_fecha" | "sin_nif" | "sin_subcuenta_tercero" | "sin_subcuenta" | "libro" | "corte";
   texto: string;
   /** rojo = no se puede importar tal cual; naranja = falta un dato que el asesor pone una vez. */
   nivel: "rojo" | "naranja";
@@ -454,3 +454,105 @@ export function fechaContablePorCarpeta(fecha: string | null, trimestreCarpeta: 
   if (!rango) return null;
   return fecha < rango.desde ? rango.desde : null;
 }
+
+// ---------------------------------------------------------------------------
+// Duplicados: la misma factura es mismo cliente, libro, NIF del tercero y nº de
+// factura (lo que mira Aplifisa). El número se compara sin separadores, porque
+// la IA puede leer "FA-2026/12" como "FA2026/12".
+// ---------------------------------------------------------------------------
+
+export const normalizaNumeroFactura = (n: string | null | undefined) =>
+  (n ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+export function mismaFactura(
+  a: { proveedor_cif: string | null; numero_factura: string | null },
+  b: { proveedor_cif: string | null; numero_factura: string | null },
+): boolean {
+  const na = normalizaNumeroFactura(a.numero_factura);
+  const nifA = (a.proveedor_cif ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return !!na && !!nifA
+    && na === normalizaNumeroFactura(b.numero_factura)
+    && nifA === (b.proveedor_cif ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+// ---------------------------------------------------------------------------
+// PDF con varias facturas: la IA describe cada página y esta regla las agrupa.
+// Puede haber facturas de varias páginas; nunca varias facturas en una página
+// (confirmado por el despacho) ni tickets.
+// ---------------------------------------------------------------------------
+
+export interface InfoPagina {
+  /** Número de página en el PDF completo (1 = primera). */
+  pagina: number;
+  /** Lo que cree la IA: empieza una factura, sigue la anterior o está en blanco. */
+  tipo: "inicio" | "continuacion" | "vacia";
+  numero_factura: string | null;
+  nif_emisor: string | null;
+  /** "Página 2 de 3" si la página lo dice. */
+  pagina_de: { n: number; total: number } | null;
+  /** La IA no pudo describir la página (sin clave, respuesta incompleta): corte dudoso. */
+  incierta?: boolean;
+}
+
+export interface GrupoPaginas {
+  desde: number;
+  hasta: number;
+  numero_factura: string | null;
+  nif_emisor: string | null;
+  /** El corte no está claro: la factura saldrá marcada para revisar. */
+  dudoso: boolean;
+}
+
+/**
+ * Agrupa las páginas en facturas. Manda lo que se puede comprobar ("página 2 de
+ * 3", mismo nº de factura) sobre lo que opina la IA; si se contradicen, el corte
+ * queda como dudoso. Las páginas en blanco se descartan.
+ */
+export function agruparPaginas(paginas: InfoPagina[]): GrupoPaginas[] {
+  const grupos: GrupoPaginas[] = [];
+  let anterior: InfoPagina | null = null;
+  for (const p of [...paginas].sort((a, b) => a.pagina - b.pagina)) {
+    if (p.tipo === "vacia") continue;
+    const g = grupos[grupos.length - 1];
+    let inicio: boolean;
+    let dudoso = false;
+    const numP = normalizaNumeroFactura(p.numero_factura);
+    const numG = normalizaNumeroFactura(g?.numero_factura);
+
+    if (!g) {
+      inicio = true;
+      dudoso = p.tipo === "continuacion" || (p.pagina_de != null && p.pagina_de.n > 1);
+    } else if (p.pagina_de) {
+      inicio = p.pagina_de.n === 1;
+      // "Página 3 de 3" tras una página que no era la 2: algo falta o sobra.
+      const esperado = anterior?.pagina_de && anterior.pagina_de.total === p.pagina_de.total ? anterior.pagina_de.n + 1 : null;
+      if (!inicio && esperado !== null && esperado !== p.pagina_de.n) dudoso = true;
+      if (!inicio && numP && numG && numP !== numG) dudoso = true;
+    } else if (numP && numG) {
+      inicio = numP !== numG;
+      if (inicio !== (p.tipo === "inicio")) dudoso = true;
+    } else {
+      inicio = p.tipo === "inicio";
+      // Una continuación sin nada que la ate a la anterior no es segura.
+      if (!inicio && !numP) dudoso = true;
+    }
+
+    if (p.incierta) dudoso = true;
+    if (inicio) {
+      grupos.push({ desde: p.pagina, hasta: p.pagina, numero_factura: p.numero_factura, nif_emisor: p.nif_emisor, dudoso });
+    } else {
+      g.hasta = p.pagina;
+      g.dudoso ||= dudoso;
+      g.numero_factura ??= p.numero_factura;
+      g.nif_emisor ??= p.nif_emisor;
+    }
+    anterior = p;
+  }
+  return grupos;
+}
+
+export const AVISO_CORTE: Aviso = {
+  codigo: "corte",
+  texto: "Revisa el corte: no está claro dónde empieza o acaba esta factura dentro del PDF.",
+  nivel: "naranja",
+};

@@ -5,12 +5,14 @@ import {
   semaforo, inferirCuotaIva, filasAplifisa, COLUMNAS_APLIFISA, esExportable,
   trimestreDe, rangoTrimestre, rangoPeriodo, resolverClienteCarpeta, resolverClienteRuta, esCarpetaDePeriodo,
   regimenDe, subcuenta8, cuentaSegunRegimen, avisosFactura, confianzaConAvisos,
-  parsearRutaServidor, fechaContablePorCarpeta, fechaDelLibro,
-  type FacturaDatos, type ClienteCarpeta,
+  parsearRutaServidor, fechaContablePorCarpeta, fechaDelLibro, agruparPaginas, mismaFactura, normalizaNumeroFactura,
+  type FacturaDatos, type ClienteCarpeta, type InfoPagina,
 } from "../../src/lib/ocr/core.ts";
 import { codigosDe, CONCEPTOS_GASTO, CONCEPTOS_INGRESO } from "../../src/lib/ocr/conceptos.ts";
 import { mimeFactura, esFicheroOculto } from "../../src/lib/ocr/subida.ts";
 import { generarExcelAplifisa, type FacturaExcel } from "../../src/lib/ocr/aplifisa.ts";
+import { contarPaginas, extraerPaginas } from "../../src/lib/ocr/pdf.ts";
+import { PDFDocument } from "pdf-lib";
 
 const VACIA: FacturaDatos = {
   tipo: "gasto", fecha: null, fecha_contable: null, numero_factura: null, proveedor_nombre: null,
@@ -293,4 +295,52 @@ test("generarExcelAplifisa: sin pendientes, una sola hoja y sin aviso", async ()
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buf as unknown as ArrayBuffer);
   assert.equal(wb.worksheets.length, 1);
+});
+
+// --- PDF con varias facturas ---------------------------------------------------
+
+const pag = (pagina: number, tipo: InfoPagina["tipo"], numero: string | null = null, de: [number, number] | null = null): InfoPagina => ({
+  pagina, tipo, numero_factura: numero, nif_emisor: numero ? "B11111111" : null, pagina_de: de ? { n: de[0], total: de[1] } : null,
+});
+const cortes = (ps: InfoPagina[]) => agruparPaginas(ps).map((g) => `${g.desde}-${g.hasta}${g.dudoso ? "?" : ""}`);
+
+test("agruparPaginas: facturas de una y de varias páginas", () => {
+  assert.deepEqual(cortes([
+    pag(1, "inicio", "A1"),
+    pag(2, "inicio", "A2", [1, 3]), pag(3, "continuacion", null, [2, 3]), pag(4, "continuacion", "A2", [3, 3]),
+    pag(5, "inicio", "A3"),
+  ]), ["1-1", "2-4", "5-5"]);
+});
+
+test("agruparPaginas: el mismo nº de factura une páginas aunque la IA diga 'inicio'", () => {
+  // La IA ve una cabecera repetida en la página 2, pero es la misma factura: se une y se marca.
+  assert.deepEqual(cortes([pag(1, "inicio", "F-7"), pag(2, "inicio", "F7"), pag(3, "inicio", "F8")]), ["1-2?", "3-3"]);
+});
+
+test("agruparPaginas: páginas en blanco fuera; continuación sin pistas → dudoso", () => {
+  assert.deepEqual(cortes([pag(1, "inicio", "A1"), pag(2, "vacia"), pag(3, "inicio", "A2")]), ["1-1", "3-3"]);
+  assert.deepEqual(cortes([pag(1, "inicio", "A1"), pag(2, "continuacion")]), ["1-2?"]);
+  // Empieza a mitad de una factura (la primera página dice "2 de 2").
+  assert.deepEqual(cortes([pag(1, "continuacion", null, [2, 2]), pag(2, "inicio", "B1")]), ["1-1?", "2-2"]);
+  // Sin IA: cada página sola y todas dudosas.
+  assert.deepEqual(cortes([{ ...pag(1, "inicio"), incierta: true }, { ...pag(2, "inicio"), incierta: true }]), ["1-1?", "2-2?"]);
+});
+
+test("duplicados: mismo NIF y nº aunque cambien los separadores", () => {
+  assert.equal(normalizaNumeroFactura(" fa-2026/0012 "), "FA20260012");
+  assert.ok(mismaFactura({ proveedor_cif: "B23899974", numero_factura: "FA-2026/12" }, { proveedor_cif: "b23899974", numero_factura: "FA2026 12" }));
+  assert.ok(!mismaFactura({ proveedor_cif: "B23899974", numero_factura: "FA-12" }, { proveedor_cif: "A28023430", numero_factura: "FA-12" }));
+  assert.ok(!mismaFactura({ proveedor_cif: "B23899974", numero_factura: null }, { proveedor_cif: "B23899974", numero_factura: null }));
+});
+
+test("pdf: cuenta y extrae páginas de un PDF combinado", async () => {
+  const doc = await PDFDocument.create();
+  for (let i = 1; i <= 5; i++) doc.addPage([200 + i, 300]); // cada página con un ancho distinto para reconocerla
+  const pdf = await doc.save();
+  assert.equal(await contarPaginas(pdf), 5);
+  const trozo = await extraerPaginas(pdf, 2, 4);
+  const leido = await PDFDocument.load(trozo);
+  assert.equal(leido.getPageCount(), 3);
+  assert.deepEqual(leido.getPages().map((p) => p.getWidth()), [202, 203, 204]);
+  await assert.rejects(() => extraerPaginas(pdf, 4, 6), /fuera de rango/);
 });

@@ -4,15 +4,26 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { ClienteBuscador, type OpcionCliente } from "@/components/ClienteBuscador";
-import { esFicheroOculto, MAX_BYTES_FACTURA, mimeFactura } from "@/lib/ocr/subida";
+import { esFicheroOculto, MAX_BYTES_FACTURA, MAX_MB_FACTURA, mimeFactura, PAGINAS_POR_TANDA } from "@/lib/ocr/subida";
+import { agruparPaginas, type InfoPagina } from "@/lib/ocr/core";
 import {
+  contarPaginasAction,
+  describirPaginasAction,
   detectarClientesAction,
   prepararSubidaAction,
   procesarSubidaAction,
   refrescarPrecontabilizacionAction,
 } from "@/app/(panel)/precontabilizacion/actions";
 
-type Estado = "cola" | "subiendo" | "leyendo" | "ok" | "duplicada" | "error";
+type Estado = "cola" | "subiendo" | "separando" | "leyendo" | "ok" | "separado" | "duplicada" | "error";
+
+interface Trozo {
+  desde: number;
+  hasta: number;
+  dudoso: boolean;
+  numero_factura: string | null;
+  nif_emisor: string | null;
+}
 
 interface Item {
   key: string;
@@ -26,6 +37,10 @@ interface Item {
   libro?: "gasto" | "ingreso";
   detectada?: boolean;
   mensaje?: string;
+  /** Ya subido a Storage (no se vuelve a subir al reintentar ni en sus trozos). */
+  path?: string;
+  /** Factura dentro de un PDF con varias: sus páginas. */
+  trozo?: Trozo;
 }
 
 // Cada factura tarda 10–30 s en leerse; 3 a la vez sin saturar la API de Claude.
@@ -37,8 +52,10 @@ const LIBRO_NO_DETECTADO = "No está en una carpeta GASTOS o INGRESOS: elige el 
 const ETIQUETA: Record<Estado, string> = {
   cola: "En cola",
   subiendo: "Subiendo…",
+  separando: "Separando facturas…",
   leyendo: "Leyendo con IA…",
   ok: "Leída",
+  separado: "Separado",
   duplicada: "Ya estaba subida",
   error: "Error",
 };
@@ -108,7 +125,7 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: OpcionCliente[] }
         file: n.file,
         ruta: n.ruta,
         ...(n.file.size > MAX_BYTES_FACTURA
-          ? { estado: "error" as const, mensaje: "Demasiado grande (máx. 20 MB)." }
+          ? { estado: "error" as const, mensaje: `Demasiado grande (máx. ${MAX_MB_FACTURA} MB).` }
           : { estado: "cola" as const }),
       }));
     itemsRef.current = [...itemsRef.current, ...lista];
@@ -122,23 +139,50 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: OpcionCliente[] }
     const libroFactura = libro === DETECTAR ? it.libro : libro === "ingreso" ? "ingreso" : libro === "gasto" ? "gasto" : undefined;
     if (!libroFactura) return actualizar(it.key, { estado: "error", mensaje: LIBRO_NO_DETECTADO });
     try {
-      actualizar(it.key, { estado: "subiendo", mensaje: undefined });
-      const prep = await prepararSubidaAction(it.file.name, it.file.type, it.file.size, cliente_id);
-      if ("error" in prep) return actualizar(it.key, { estado: "error", mensaje: prep.error });
+      let path = it.path;
+      if (!path) {
+        actualizar(it.key, { estado: "subiendo", mensaje: undefined });
+        const prep = await prepararSubidaAction(it.file.name, it.file.type, it.file.size, cliente_id);
+        if ("error" in prep) return actualizar(it.key, { estado: "error", mensaje: prep.error });
+        const { error } = await supabase.storage
+          .from("facturas")
+          .uploadToSignedUrl(prep.path, prep.token, it.file, { contentType: mimeFactura(it.file.name, it.file.type) ?? undefined });
+        if (error) return actualizar(it.key, { estado: "error", mensaje: `Subida: ${error.message}` });
+        path = prep.path;
+        actualizar(it.key, { path });
+      }
 
-      const { error } = await supabase.storage
-        .from("facturas")
-        .uploadToSignedUrl(prep.path, prep.token, it.file, { contentType: mimeFactura(it.file.name, it.file.type) ?? undefined });
-      if (error) return actualizar(it.key, { estado: "error", mensaje: `Subida: ${error.message}` });
+      // Un PDF de varias páginas puede traer varias facturas: se separa antes de leer.
+      if (!it.trozo && mimeFactura(it.file.name, it.file.type) === "application/pdf") {
+        actualizar(it.key, { estado: "separando", mensaje: undefined });
+        const trozos = await separarPdf(path);
+        if ("error" in trozos) return actualizar(it.key, { estado: "error", mensaje: trozos.error });
+        if (trozos.length > 1) {
+          const hijos: Item[] = trozos.map((t) => ({
+            key: crypto.randomUUID(), file: it.file, ruta: it.ruta, estado: "cola",
+            cliente: it.cliente, libro: it.libro, detectada: it.detectada, path, trozo: t,
+          }));
+          const i = itemsRef.current.findIndex((x) => x.key === it.key);
+          itemsRef.current = [
+            ...itemsRef.current.slice(0, i),
+            { ...itemsRef.current[i], estado: "separado", mensaje: `${trozos.length} facturas en ${trozos[trozos.length - 1].hasta} páginas` },
+            ...hijos,
+            ...itemsRef.current.slice(i + 1),
+          ];
+          setItems(itemsRef.current);
+          return;
+        }
+      }
 
       actualizar(it.key, { estado: "leyendo" });
       const r = await procesarSubidaAction({
-        path: prep.path,
+        path,
         nombre: it.file.name,
         mimeNavegador: it.file.type,
         rutaRelativa: it.ruta,
         cliente_id,
         libro: libroFactura,
+        paginas: it.trozo ?? null,
       });
       if (r.estado === "ok") actualizar(it.key, { estado: "ok", semaforo: r.semaforo, id: r.id });
       else if (r.estado === "duplicada") actualizar(it.key, { estado: "duplicada", id: r.id });
@@ -146,6 +190,27 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: OpcionCliente[] }
     } catch (e) {
       actualizar(it.key, { estado: "error", mensaje: (e as Error).message || "Fallo de conexión." });
     }
+  }
+
+  /** Trozos (facturas) de un PDF: describe sus páginas por tandas y las agrupa. */
+  async function separarPdf(path: string): Promise<Trozo[] | { error: string }> {
+    const c = await contarPaginasAction(path);
+    if ("error" in c) return c;
+    if (c.paginas <= 1) return [];
+    const tandas = Array.from({ length: Math.ceil(c.paginas / PAGINAS_POR_TANDA) }, (_, i) => ({
+      desde: i * PAGINAS_POR_TANDA + 1,
+      hasta: Math.min((i + 1) * PAGINAS_POR_TANDA, c.paginas),
+    }));
+    const info: InfoPagina[] = [];
+    // De dos en dos: son llamadas cortas y el resto de la cola sigue avanzando.
+    for (let i = 0; i < tandas.length; i += 2) {
+      const res = await Promise.all(tandas.slice(i, i + 2).map((t) => describirPaginasAction(path, t.desde, t.hasta)));
+      for (const r of res) {
+        if ("error" in r) return r;
+        info.push(...r);
+      }
+    }
+    return agruparPaginas(info);
   }
 
   async function procesar() {
@@ -196,7 +261,7 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: OpcionCliente[] }
   }
 
   const cuenta = (e: Estado) => items.filter((i) => i.estado === e).length;
-  const terminadas = cuenta("ok") + cuenta("duplicada") + cuenta("error");
+  const terminadas = cuenta("ok") + cuenta("separado") + cuenta("duplicada") + cuenta("error");
   const enCola = cuenta("cola");
   const errores = cuenta("error");
   const hayCarpetas = items.some((i) => i.ruta);
@@ -294,16 +359,20 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: OpcionCliente[] }
 
           <ul className="max-h-80 divide-y divide-border overflow-y-auto rounded-md border border-border">
             {items.map((i) => (
-              <li key={i.key} className="flex items-center gap-3 px-3 py-2">
+              <li key={i.key} className={`flex items-center gap-3 py-2 pr-3 ${i.trozo ? "pl-8" : "pl-3"}`}>
                 <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${i.semaforo ? PUNTO[i.semaforo] : "bg-border"}`} />
-                <span className="min-w-0 flex-1 truncate text-fg" title={i.ruta ?? i.file.name}>{i.ruta ?? i.file.name}</span>
+                <span className="min-w-0 flex-1 truncate text-fg" title={i.ruta ?? i.file.name}>
+                  {i.trozo
+                    ? <>↳ págs. {i.trozo.desde}{i.trozo.hasta > i.trozo.desde ? `-${i.trozo.hasta}` : ""}{i.trozo.numero_factura ? ` · ${i.trozo.numero_factura}` : ""}{i.trozo.dudoso && <span className="text-warning" title="No está claro dónde empieza o acaba esta factura"> · corte dudoso</span>}</>
+                    : i.ruta ?? i.file.name}
+                </span>
                 {(i.cliente || i.libro) && (
                   <span className="hidden truncate text-xs text-fg-muted sm:inline">
                     {[i.cliente?.razon_social, i.libro && (i.libro === "gasto" ? "Gastos" : "Ingresos")].filter(Boolean).join(" · ")}
                   </span>
                 )}
                 <span className={`shrink-0 text-xs ${i.estado === "error" ? "text-error" : "text-fg-muted"}`} title={i.mensaje}>
-                  {i.estado === "error" && i.mensaje ? i.mensaje : ETIQUETA[i.estado]}
+                  {i.estado === "error" && i.mensaje ? i.mensaje : i.estado === "separado" ? `Separado: ${i.mensaje}` : ETIQUETA[i.estado]}
                 </span>
                 {i.id && (
                   <Link href={`/precontabilizacion/${i.id}`} className="shrink-0 text-xs font-medium text-accent hover:underline">Ver</Link>

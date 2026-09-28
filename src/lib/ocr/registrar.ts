@@ -3,7 +3,10 @@ import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { procesarFactura } from "./procesar";
 import { actualizarAvisoPendientes } from "./avisos";
-import { fechaContablePorCarpeta, semaforo, type ClienteCarpeta, type Semaforo, type TipoFactura } from "./core";
+import {
+  AVISO_CORTE, confianzaConAvisos, fechaContablePorCarpeta, mismaFactura, semaforo,
+  type ClienteCarpeta, type Semaforo, type TipoFactura,
+} from "./core";
 
 /** Huella del fichero: la misma factura no se procesa dos veces (app o servidor). */
 export const huella = (buffer: Buffer) => createHash("sha256").update(buffer).digest("hex");
@@ -14,6 +17,29 @@ export async function facturaPorHuella(
 ): Promise<{ id: string; cliente_id: string | null } | null> {
   const { data } = await admin.from("facturas_ocr").select("id, cliente_id").eq("archivo_hash", hash).maybeSingle();
   return data;
+}
+
+/** Huella de una factura dentro de un PDF con varias: la del PDF + sus páginas. */
+export const huellaPaginas = (hashPdf: string, desde: number, hasta: number) =>
+  createHash("sha256").update(`${hashPdf}:${desde}-${hasta}`).digest("hex");
+
+/**
+ * ¿Ya está esta factura? Mismo cliente, libro, NIF del tercero y nº de factura.
+ * Sin cliente, NIF o número no se puede saber: se da por nueva.
+ */
+export async function facturaDuplicada(
+  admin: SupabaseClient,
+  f: { cliente_id: string | null; tipo: TipoFactura; proveedor_cif: string | null; numero_factura: string | null },
+): Promise<string | null> {
+  if (!f.cliente_id || !f.proveedor_cif || !f.numero_factura) return null;
+  const { data } = await admin
+    .from("facturas_ocr")
+    .select("id, proveedor_cif, numero_factura")
+    .eq("cliente_id", f.cliente_id)
+    .eq("tipo", f.tipo)
+    .eq("proveedor_cif", f.proveedor_cif.toUpperCase())
+    .not("numero_factura", "is", null);
+  return (data ?? []).find((x) => mismaFactura(x, f))?.id ?? null;
 }
 
 /** La cartera supera las 1000 filas que devuelve Supabase por consulta. */
@@ -46,6 +72,8 @@ export interface EntradaFactura {
   ruta_servidor?: string | null;
   archivo_hash?: string | null;
   subido_por?: string | null;
+  /** Factura sacada de un PDF con varias: sus páginas y si el corte es dudoso. */
+  paginas?: { desde: number; hasta: number; dudoso: boolean } | null;
 }
 
 /**
@@ -58,11 +86,22 @@ export async function registrarFactura(
   db: SupabaseClient,
   admin: SupabaseClient,
   e: EntradaFactura,
-): Promise<{ id: string; semaforo: Semaforo; fecha: string | null }> {
+): Promise<{ id: string; semaforo: Semaforo; fecha: string | null; duplicada: boolean }> {
   const { data: cliente } = e.cliente_id
     ? await admin.from("clientes").select("id, cif, razon_social, regimen_contable").eq("id", e.cliente_id).maybeSingle()
     : { data: null };
   const r = await procesarFactura(admin, e.base64, e.mime, { tipo: e.tipo, cliente });
+
+  // Misma factura ya registrada (p. ej. el PDF del trimestre reenviado con más facturas).
+  const previa = await facturaDuplicada(admin, {
+    cliente_id: e.cliente_id, tipo: e.tipo, proveedor_cif: r.proveedor_cif, numero_factura: r.numero_factura,
+  });
+  if (previa) return { id: previa, semaforo: semaforo(r.confianza), fecha: r.fecha, duplicada: true };
+
+  if (e.paginas?.dudoso) {
+    r.avisos = [AVISO_CORTE, ...r.avisos];
+    r.confianza = confianzaConAvisos(r.confianza, r.avisos);
+  }
   const { data, error } = await db
     .from("facturas_ocr")
     .insert({
@@ -95,13 +134,15 @@ export async function registrarFactura(
       ruta_servidor: e.ruta_servidor ?? null,
       archivo_hash: e.archivo_hash ?? null,
       subido_por: e.subido_por ?? null,
+      pagina_desde: e.paginas?.desde ?? null,
+      pagina_hasta: e.paginas?.hasta ?? null,
     })
     .select("id")
     .single();
   if (error) throw new Error(`No se pudo guardar la factura: ${error.message}`);
   // Naranja o roja: avisa en la campana a quien revisa ese cliente.
   if (semaforo(r.confianza) !== "verde") await actualizarAvisoPendientes(admin, e.cliente_id, e.tipo);
-  return { id: data.id, semaforo: semaforo(r.confianza), fecha: r.fecha };
+  return { id: data.id, semaforo: semaforo(r.confianza), fecha: r.fecha, duplicada: false };
 }
 
 /**
