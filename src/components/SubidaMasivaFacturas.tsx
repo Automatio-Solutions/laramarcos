@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { esFicheroOculto, MAX_BYTES_FACTURA, mimeFactura } from "@/lib/ocr/subida";
 import {
+  detectarClientesAction,
   prepararSubidaAction,
   procesarSubidaAction,
   refrescarPrecontabilizacionAction,
@@ -19,13 +20,15 @@ interface Item {
   estado: Estado;
   semaforo?: "verde" | "naranja" | "rojo";
   id?: string;
-  cliente?: string | null;
+  /** Cliente detectado por carpeta (con "Detectar por nombre de carpeta"). */
+  cliente?: { id: string; razon_social: string };
   mensaje?: string;
 }
 
 // Cada factura tarda 10–30 s en leerse; 3 a la vez sin saturar la API de Claude.
 const EN_PARALELO = 3;
 const DETECTAR = "__carpeta";
+const NO_DETECTADO = "Cliente no detectado: súbela eligiendo el cliente.";
 
 const ETIQUETA: Record<Estado, string> = {
   cola: "En cola",
@@ -109,9 +112,11 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
 
   async function procesarUno(it: Item) {
     const supabase = createClient();
+    const cliente_id = cliente === DETECTAR ? it.cliente?.id : cliente;
+    if (!cliente_id) return actualizar(it.key, { estado: "error", mensaje: NO_DETECTADO });
     try {
       actualizar(it.key, { estado: "subiendo", mensaje: undefined });
-      const prep = await prepararSubidaAction(it.file.name, it.file.type, it.file.size);
+      const prep = await prepararSubidaAction(it.file.name, it.file.type, it.file.size, cliente_id);
       if ("error" in prep) return actualizar(it.key, { estado: "error", mensaje: prep.error });
 
       const { error } = await supabase.storage
@@ -125,10 +130,9 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
         nombre: it.file.name,
         tipo: it.file.type,
         rutaRelativa: it.ruta,
-        cliente_id: cliente && cliente !== DETECTAR ? cliente : null,
-        detectarCliente: cliente === DETECTAR,
+        cliente_id,
       });
-      if (r.estado === "ok") actualizar(it.key, { estado: "ok", semaforo: r.semaforo, id: r.id, cliente: r.cliente });
+      if (r.estado === "ok") actualizar(it.key, { estado: "ok", semaforo: r.semaforo, id: r.id });
       else if (r.estado === "duplicada") actualizar(it.key, { estado: "duplicada", id: r.id });
       else actualizar(it.key, { estado: "error", mensaje: r.mensaje });
     } catch (e) {
@@ -137,7 +141,18 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
   }
 
   async function procesar() {
+    if (!cliente) return;
     setEnMarcha(true);
+    // Detectar por carpeta: se resuelve todo el lote ANTES de subir. Lo que no
+    // tenga cliente no se sube: se marca para subirlo eligiendo el cliente a mano.
+    if (cliente === DETECTAR) {
+      const pendientes = itemsRef.current.filter((i) => i.estado === "cola" && !i.cliente);
+      const detectados = pendientes.length ? await detectarClientesAction(pendientes.map((i) => i.ruta)) : [];
+      pendientes.forEach((it, n) => {
+        const c = detectados[n];
+        actualizar(it.key, c ? { cliente: c } : { estado: "error", mensaje: NO_DETECTADO });
+      });
+    }
     let hechas = 0;
     const siguiente = () => itemsRef.current.find((i) => i.estado === "cola");
     const trabajador = async () => {
@@ -191,7 +206,7 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
             disabled={enMarcha}
             className="rounded-md border border-border bg-surface px-2 py-2 text-fg"
           >
-            <option value="">— Sin cliente (asignar al revisar) —</option>
+            <option value="" disabled>— Elige cliente —</option>
             <option value={DETECTAR}>📁 Detectar por nombre de carpeta</option>
             {clientes.map((c) => <option key={c.id} value={c.id}>{c.razon_social}</option>)}
           </select>
@@ -211,7 +226,7 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
           className="rounded-md border border-border px-4 py-2 font-medium text-fg hover:bg-surface-raised disabled:opacity-50">
           📁 Elegir carpeta
         </button>
-        <button type="button" disabled={enMarcha || enCola === 0} onClick={() => void procesar()}
+        <button type="button" disabled={enMarcha || enCola === 0 || !cliente} onClick={() => void procesar()}
           className="rounded-md bg-primary px-4 py-2 font-medium text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50">
           {enMarcha ? "Procesando…" : `Subir y procesar${enCola ? ` ${enCola}` : ""}`}
         </button>
@@ -219,7 +234,7 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
 
       {items.length === 0 ? (
         <p className="rounded-md border border-dashed border-border px-4 py-6 text-center text-fg-muted">
-          Arrastra aquí facturas o carpetas (PDF, JPG, PNG), o usa los botones.
+          Elige el cliente y arrastra aquí facturas o carpetas (PDF, JPG, PNG), o usa los botones.
         </p>
       ) : (
         <>
@@ -242,8 +257,11 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
               <div className="h-full bg-primary transition-all" style={{ width: `${(terminadas / items.length) * 100}%` }} />
             </div>
             {enMarcha && <p className="text-xs text-fg-muted">No cierres esta pestaña hasta que termine.</p>}
+            {!cliente && enCola > 0 && (
+              <p className="text-xs text-warning">Elige el cliente para poder subir: toda factura tiene que ir asignada a uno.</p>
+            )}
             {cliente === DETECTAR && !hayCarpetas && (
-              <p className="text-xs text-warning">Para detectar el cliente hay que subir carpetas; estos archivos quedarán sin cliente.</p>
+              <p className="text-xs text-warning">Para detectar el cliente hay que subir carpetas; estos archivos no se subirán.</p>
             )}
           </div>
 
@@ -252,7 +270,7 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
               <li key={i.key} className="flex items-center gap-3 px-3 py-2">
                 <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${i.semaforo ? PUNTO[i.semaforo] : "bg-border"}`} />
                 <span className="min-w-0 flex-1 truncate text-fg" title={i.ruta ?? i.file.name}>{i.ruta ?? i.file.name}</span>
-                {i.cliente && <span className="hidden truncate text-xs text-fg-muted sm:inline">{i.cliente}</span>}
+                {i.cliente && <span className="hidden truncate text-xs text-fg-muted sm:inline">{i.cliente.razon_social}</span>}
                 <span className={`shrink-0 text-xs ${i.estado === "error" ? "text-error" : "text-fg-muted"}`} title={i.mensaje}>
                   {i.estado === "error" && i.mensaje ? i.mensaje : ETIQUETA[i.estado]}
                 </span>

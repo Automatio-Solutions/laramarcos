@@ -17,22 +17,54 @@ import {
 // los sube directo a Storage con una URL firmada y luego pide procesar cada uno
 // en su propia llamada (límite de 60 s por función). Las facturas del servidor
 // del despacho entran por /api/agente/facturas.
+// Toda factura subida desde la app lleva cliente: sin él no sale en ningún Excel.
 // ---------------------------------------------------------------------------
 
 export type ResultadoSubida =
-  | { estado: "ok"; id: string; semaforo: "verde" | "naranja" | "rojo"; cliente: string | null }
+  | { estado: "ok"; id: string; semaforo: "verde" | "naranja" | "rojo" }
   | { estado: "duplicada"; id: string }
   | { estado: "error"; mensaje: string };
+
+const SIN_CLIENTE = "Elige el cliente de la factura.";
+
+/** El cliente existe y el usuario lo ve (RLS): un asesor no sube a clientes ajenos. */
+async function clienteVisible(supabase: Awaited<ReturnType<typeof createClient>>, id: string | null) {
+  if (!id) return false;
+  const { data } = await supabase.from("clientes").select("id").eq("id", id).maybeSingle();
+  return !!data;
+}
+
+/**
+ * "Detectar por carpeta": cliente de cada archivo a partir de su ruta
+ * ("Don Benito/2034 - PÉREZ/…"), antes de subir nada. null = no detectado, y
+ * ese archivo no se sube. Solo entre los clientes que el usuario puede ver.
+ */
+export async function detectarClientesAction(
+  rutas: (string | null)[],
+): Promise<({ id: string; razon_social: string } | null)[]> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return rutas.map(() => null);
+  const clientes = await todosLosClientes(supabase);
+  return rutas.map((ruta) => {
+    if (!ruta) return null;
+    const carpetas = ruta.replace(/\\/g, "/").split("/").slice(0, -1);
+    const c = resolverClienteRuta(carpetas, clientes, OFICINAS);
+    return c ? { id: c.id, razon_social: c.razon_social } : null;
+  });
+}
 
 /** Paso 1: URL firmada para subir un fichero a la carpeta del usuario en Storage. */
 export async function prepararSubidaAction(
   nombre: string,
   tipo: string,
   tamano: number,
+  cliente_id: string | null,
 ): Promise<{ path: string; token: string } | { error: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Sesión caducada. Vuelve a entrar." };
+  if (!(await clienteVisible(supabase, cliente_id))) return { error: SIN_CLIENTE };
   if (!mimeFactura(nombre, tipo)) return { error: "Solo PDF o imagen (JPG, PNG, WEBP)." };
   if (tamano > MAX_BYTES_FACTURA) return { error: "Demasiado grande (máx. 20 MB)." };
 
@@ -43,27 +75,27 @@ export async function prepararSubidaAction(
   return { path: data.path, token: data.token };
 }
 
-/**
- * Paso 2: lee con IA el fichero ya subido y lo registra. Con `detectarCliente`
- * el cliente sale de las carpetas de `rutaRelativa` ("Don Benito/2034 - PÉREZ/…").
- */
+/** Paso 2: lee con IA el fichero ya subido y lo registra en su cliente. */
 export async function procesarSubidaAction(e: {
   path: string;
   nombre: string;
   tipo: string;
   rutaRelativa: string | null;
-  cliente_id: string | null;
-  detectarCliente: boolean;
+  cliente_id: string;
 }): Promise<ResultadoSubida> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { estado: "error", mensaje: "Sesión caducada. Vuelve a entrar." };
   // Solo se procesan ficheros de la carpeta del propio usuario.
   if (!e.path.startsWith(`${user.id}/`)) return { estado: "error", mensaje: "Ruta no válida." };
+  const admin = createAdminClient();
+  if (!(await clienteVisible(supabase, e.cliente_id))) {
+    await admin.storage.from("facturas").remove([e.path]);
+    return { estado: "error", mensaje: SIN_CLIENTE };
+  }
   const mime = mimeFactura(e.nombre, e.tipo);
   if (!mime) return { estado: "error", mensaje: "Solo PDF o imagen." };
 
-  const admin = createAdminClient();
   const { data: blob, error } = await admin.storage.from("facturas").download(e.path);
   if (error || !blob) return { estado: "error", mensaje: "No se encontró el fichero subido." };
   const buffer = Buffer.from(await blob.arrayBuffer());
@@ -75,27 +107,18 @@ export async function procesarSubidaAction(e: {
     return { estado: "duplicada", id: previa.id };
   }
 
-  let cliente_id = e.cliente_id;
-  let cliente: string | null = null;
-  if (!cliente_id && e.detectarCliente && e.rutaRelativa) {
-    const carpetas = e.rutaRelativa.replace(/\\/g, "/").split("/").slice(0, -1);
-    const c = resolverClienteRuta(carpetas, await todosLosClientes(admin), OFICINAS);
-    cliente_id = c?.id ?? null;
-    cliente = c?.razon_social ?? null;
-  }
-
   try {
     const r = await registrarFactura(supabase, admin, {
       base64: buffer.toString("base64"),
       mime,
-      cliente_id,
+      cliente_id: e.cliente_id,
       archivo_nombre: e.rutaRelativa ?? e.nombre,
       archivo_path: e.path,
       archivo_hash: hash,
       origen: "app",
       subido_por: user.id,
     });
-    return { estado: "ok", id: r.id, semaforo: r.semaforo, cliente };
+    return { estado: "ok", id: r.id, semaforo: r.semaforo };
   } catch (err) {
     // La misma factura en dos envíos simultáneos: el índice único frena el segundo.
     const ganadora = await facturaPorHuella(admin, hash);
@@ -124,9 +147,12 @@ export async function corregirFacturaAction(id: string, formData: FormData) {
   const proveedor_nombre = texto("proveedor_nombre");
   const subcuenta = texto("subcuenta");
   const iva_tipo = num("iva_tipo");
+  // Sin cliente la factura no sale en ningún Excel: no se puede dar por revisada.
+  const cliente_id = texto("cliente_id");
+  if (!(await clienteVisible(supabase, cliente_id))) redirect(`/precontabilizacion/${id}?error=cliente`);
 
   const { data: actualizada } = await supabase.from("facturas_ocr").update({
-    cliente_id: texto("cliente_id"),
+    cliente_id,
     fecha: texto("fecha"),
     numero_factura: texto("numero_factura"),
     proveedor_nombre,
@@ -167,6 +193,7 @@ export async function aprobarFacturaAction(id: string) {
     .from("facturas_ocr")
     .update({ revisada: true })
     .eq("id", id)
+    .not("cliente_id", "is", null) // sin cliente se aprueba desde "Revisar", eligiéndolo
     .select("proveedor_cif, proveedor_nombre, subcuenta, iva_tipo")
     .maybeSingle();
   // Aprobar confirma lo leído: un proveedor nuevo queda memorizado, pero no se

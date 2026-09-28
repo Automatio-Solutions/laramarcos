@@ -21,8 +21,15 @@ const ORIGEN_LABEL: Record<string, string> = {
   manual: "✍️ Corregida a mano",
 };
 
-export default async function RevisarFacturaPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function RevisarFacturaPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string }>;
+}) {
   const { id } = await params;
+  const { error } = await searchParams;
   const supabase = await createClient();
   const [{ data }, clientes] = await Promise.all([
     supabase.from("facturas_ocr").select("*").eq("id", id).maybeSingle(),
@@ -42,13 +49,17 @@ export default async function RevisarFacturaPage({ params }: { params: Promise<{
       </header>
 
       <form action={action} className="space-y-5">
-        {/* Las facturas del servidor cuya carpeta no se pudo emparejar llegan sin cliente. */}
+        {/* Obligatorio: sin cliente no sale en ningún Excel. Las del servidor cuya
+            carpeta no se pudo emparejar llegan sin él. */}
         <label className="block space-y-1">
-          <span className="text-sm font-medium text-fg">Cliente</span>
-          <select name="cliente_id" defaultValue={f.cliente_id ?? ""} className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-fg">
-            <option value="">— Sin cliente —</option>
+          <span className="text-sm font-medium text-fg">Cliente<span className="text-error"> *</span></span>
+          <select name="cliente_id" required defaultValue={f.cliente_id ?? ""} className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-fg">
+            <option value="" disabled>— Elige cliente —</option>
             {clientes.map((c) => <option key={c.id} value={c.id}>{c.razon_social}</option>)}
           </select>
+          {(error === "cliente" || !f.cliente_id) && (
+            <span className="block text-xs text-error">Asigna un cliente: sin él la factura no sale en ningún Excel.</span>
+          )}
         </label>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Fecha expedición" name="fecha" type="date" defaultValue={f.fecha} />
