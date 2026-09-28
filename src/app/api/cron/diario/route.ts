@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { autorizadoCron } from "@/lib/cron/auth";
+import { ejecutarResumenFacturas } from "@/lib/ocr/avisos";
 import {
   ejecutarAlertas,
   ejecutarRecurrentes,
@@ -58,6 +59,7 @@ export async function GET(request: NextRequest) {
 
   await paso("alertas", () => ejecutarAlertas(admin, hoy), salida);
   await paso("resumen_diario", () => ejecutarResumenDiario(admin, hoy), salida);
+  await paso("resumen_facturas", () => ejecutarResumenFacturas(admin), salida);
   await paso("presupuestos_recurrentes", () => ejecutarRecurrentes(admin, hoy), salida);
 
   // La vigilancia solo entra si queda tiempo real para terminarla. Media

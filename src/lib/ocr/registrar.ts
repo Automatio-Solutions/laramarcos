@@ -2,6 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { procesarFactura } from "./procesar";
+import { actualizarAvisoPendientes } from "./avisos";
 import { fechaContablePorCarpeta, semaforo, type ClienteCarpeta, type Semaforo, type TipoFactura } from "./core";
 
 /** Huella del fichero: la misma factura no se procesa dos veces (app o servidor). */
@@ -98,6 +99,8 @@ export async function registrarFactura(
     .select("id")
     .single();
   if (error) throw new Error(`No se pudo guardar la factura: ${error.message}`);
+  // Naranja o roja: avisa en la campana a quien revisa ese cliente.
+  if (semaforo(r.confianza) !== "verde") await actualizarAvisoPendientes(admin, e.cliente_id, e.tipo);
   return { id: data.id, semaforo: semaforo(r.confianza), fecha: r.fecha };
 }
 

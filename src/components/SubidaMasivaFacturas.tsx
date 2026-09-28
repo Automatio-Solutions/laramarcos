@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { ClienteBuscador, type OpcionCliente } from "@/components/ClienteBuscador";
 import { esFicheroOculto, MAX_BYTES_FACTURA, mimeFactura } from "@/lib/ocr/subida";
 import {
   detectarClientesAction,
@@ -68,7 +69,7 @@ async function leerArrastre(dt: DataTransfer): Promise<{ file: File; ruta: strin
   return out;
 }
 
-export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; razon_social: string }[] }) {
+export function SubidaMasivaFacturas({ clientes }: { clientes: OpcionCliente[] }) {
   const [items, setItems] = useState<Item[]>([]);
   const [ignorados, setIgnorados] = useState(0);
   const [cliente, setCliente] = useState("");
@@ -213,19 +214,16 @@ export function SubidaMasivaFacturas({ clientes }: { clientes: { id: string; raz
       }}
     >
       <div className="flex flex-wrap items-end gap-3">
-        <label className="space-y-1">
+        <div className="space-y-1">
           <span className="block text-fg-muted">Cliente</span>
-          <select
+          <ClienteBuscador
+            clientes={clientes}
             value={cliente}
-            onChange={(e) => setCliente(e.target.value)}
+            onChange={setCliente}
             disabled={enMarcha}
-            className="rounded-md border border-border bg-surface px-2 py-2 text-fg"
-          >
-            <option value="" disabled>— Elige cliente —</option>
-            <option value={DETECTAR}>📁 Detectar por nombre de carpeta</option>
-            {clientes.map((c) => <option key={c.id} value={c.id}>{c.razon_social}</option>)}
-          </select>
-        </label>
+            extra={[{ id: DETECTAR, etiqueta: "📁 Detectar por nombre de carpeta" }]}
+          />
+        </div>
         <label className="space-y-1">
           <span className="block text-fg-muted">Libro</span>
           <select

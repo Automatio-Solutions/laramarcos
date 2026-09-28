@@ -21,8 +21,30 @@ const DE_ENTRADA = new Set([0, 1, 2, 3, 4, 5, 6, 7, 13]);
 const NARANJA = "FFFFC000";
 const AZUL = "FF0000FF";
 
-function hojaLibro(wb: ExcelJS.Workbook, nombre: string, facturas: FacturaExcel[], extra: string[] = []) {
-  const ws = wb.addWorksheet(nombre, { views: [{ state: "frozen", ySplit: 1 }] });
+const ROJO = "FFC00000";
+
+/**
+ * Una hoja con las columnas del modelo. `aviso` pone un rótulo rojo encima de la
+ * cabecera: solo en "Pendientes de revisar", que no se importa. La hoja
+ * "Libro de Facturas" queda exactamente con el formato del modelo.
+ */
+function hojaLibro(
+  wb: ExcelJS.Workbook,
+  nombre: string,
+  facturas: FacturaExcel[],
+  { extra = [], aviso }: { extra?: string[]; aviso?: string } = {},
+) {
+  const filaCabecera = aviso ? 2 : 1;
+  const ws = wb.addWorksheet(nombre, { views: [{ state: "frozen", ySplit: filaCabecera }] });
+  const ncols = COLUMNAS_APLIFISA.length + extra.length;
+  if (aviso) {
+    const r = ws.addRow([aviso]);
+    ws.mergeCells(1, 1, 1, ncols);
+    r.height = 28;
+    r.getCell(1).font = { bold: true, size: 13, color: { argb: "FFFFFFFF" } };
+    r.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: ROJO } };
+    r.getCell(1).alignment = { vertical: "middle" };
+  }
   const cabecera = ws.addRow([...COLUMNAS_APLIFISA, ...extra]);
   cabecera.eachCell((c) => {
     c.font = { bold: true, color: { argb: "FF000000" } };
@@ -45,8 +67,8 @@ function hojaLibro(wb: ExcelJS.Workbook, nombre: string, facturas: FacturaExcel[
       });
     }
   }
-  const ultimaCol = String.fromCharCode(64 + COLUMNAS_APLIFISA.length + extra.length);
-  ws.autoFilter = `A1:${ultimaCol}${Math.max(ws.rowCount, 2)}`;
+  const ultimaCol = String.fromCharCode(64 + ncols);
+  ws.autoFilter = `A${filaCabecera}:${ultimaCol}${Math.max(ws.rowCount, filaCabecera + 1)}`;
 }
 
 /** Libro de facturas de un cliente/tipo/periodo, ordenado por fecha. */
@@ -57,6 +79,14 @@ export async function generarExcelAplifisa(facturas: FacturaExcel[]): Promise<Bu
   wb.creator = "LaraMarcos Asesores";
   hojaLibro(wb, "Libro de Facturas", porFecha.filter(esExportable));
   const pendientes = porFecha.filter((f) => !esExportable(f));
-  if (pendientes.length) hojaLibro(wb, "Pendientes de revisar", pendientes, ["Semáforo", "Archivo"]);
+  if (pendientes.length) {
+    const n = pendientes.length;
+    hojaLibro(wb, "Pendientes de revisar", pendientes, {
+      extra: ["Semáforo", "Archivo"],
+      aviso: `⚠ ${n === 1 ? "FALTA 1 FACTURA" : `FALTAN ${n} FACTURAS`} POR REVISAR. No importes este libro en Aplifisa hasta revisarlas en la app.`,
+    });
+    // Quien abra el Excel cae en el aviso, no en el libro a medias.
+    wb.views = [{ x: 0, y: 0, width: 20000, height: 12000, firstSheet: 0, activeTab: 1, visibility: "visible" }];
+  }
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
