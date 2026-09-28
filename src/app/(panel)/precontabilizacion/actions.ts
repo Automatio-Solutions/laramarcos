@@ -10,6 +10,7 @@ import {
   type LineaIva, type TipoFactura,
 } from "@/lib/ocr/core";
 import { codigosDe } from "@/lib/ocr/conceptos";
+import { actualizarAvisoPendientes } from "@/lib/ocr/avisos";
 import { MAX_BYTES_FACTURA, mimeFactura } from "@/lib/ocr/subida";
 import {
   facturaPorHuella, huella, memorizarCuentas, registrarFactura, todosLosClientes,
@@ -178,6 +179,9 @@ export async function corregirFacturaAction(id: string, formData: FormData) {
   const suma = (k: "base" | "cuota") =>
     lineas.some((l) => l[k] != null) ? Math.round(lineas.reduce((s, l) => s + (l[k] ?? 0), 0) * 100) / 100 : null;
 
+  // Cliente y libro de antes: si el asesor la mueve, el aviso de allí también baja.
+  const { data: antes } = await supabase.from("facturas_ocr").select("cliente_id, tipo").eq("id", id).maybeSingle();
+
   const datos = {
     tipo,
     fecha: texto("fecha"),
@@ -214,14 +218,19 @@ export async function corregirFacturaAction(id: string, formData: FormData) {
   // AC-10: aprende las cuentas para futuras facturas de este proveedor en este
   // cliente. Solo si el asesor podía editar esta factura (RLS).
   if (actualizada?.length) {
+    const admin = createAdminClient();
     await memorizarCuentas(
-      createAdminClient(),
+      admin,
       {
         cliente_id, tipo, nif: proveedor_cif, nombre: proveedor_nombre,
         subcuenta, subcuenta_tercero, iva_tipo: datos.iva_tipo,
       },
       { sobrescribir: true },
     );
+    await actualizarAvisoPendientes(admin, cliente_id, tipo);
+    if (antes && (antes.cliente_id !== cliente_id || antes.tipo !== tipo)) {
+      await actualizarAvisoPendientes(admin, antes.cliente_id, antes.tipo);
+    }
   }
 
   revalidatePath("/precontabilizacion");
@@ -240,14 +249,16 @@ export async function aprobarFacturaAction(id: string) {
   // Aprobar confirma lo leído: un proveedor nuevo queda memorizado en el cliente,
   // pero no se pisa lo que ya había.
   if (f) {
+    const admin = createAdminClient();
     await memorizarCuentas(
-      createAdminClient(),
+      admin,
       {
         cliente_id: f.cliente_id, tipo: f.tipo, nif: f.proveedor_cif, nombre: f.proveedor_nombre,
         subcuenta: f.subcuenta, subcuenta_tercero: f.subcuenta_tercero, iva_tipo: f.iva_tipo,
       },
       { sobrescribir: false },
     );
+    await actualizarAvisoPendientes(admin, f.cliente_id, f.tipo);
   }
   revalidatePath("/precontabilizacion");
 }

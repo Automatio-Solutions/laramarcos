@@ -4,7 +4,7 @@ export type Semaforo = "verde" | "naranja" | "rojo";
 
 /** AC-08: verde (>90% aprobado auto), naranja (revisión rápida), rojo (revisar). */
 export function semaforo(confianza: number): Semaforo {
-  if (confianza >= 90) return "verde";
+  if (confianza >= 90) return "verde"; // = CONFIANZA_VERDE
   if (confianza >= 60) return "naranja";
   return "rojo";
 }
@@ -146,6 +146,18 @@ export function filasAplifisa(f: FacturaDatos): CeldaAplifisa[][] {
 /** Va al Excel que se importa: revisada por un asesor o leída con confianza alta. */
 export function esExportable(f: { revisada: boolean; confianza: number }): boolean {
   return f.revisada || semaforo(f.confianza) === "verde";
+}
+
+/** "Por revisar": no irá al Excel hasta que un asesor la mire (naranja o rojo sin revisar). */
+export const esPendiente = (f: { revisada: boolean; confianza: number }) => !esExportable(f);
+
+/** Umbral de confianza del verde: por debajo, sin revisar, es pendiente. Para filtrar en BBDD. */
+export const CONFIANZA_VERDE = 90;
+
+/** Texto del aviso de facturas por revisar de un cliente y libro. */
+export function textoPendientes(n: number, cliente: string, tipo: TipoFactura): string {
+  const libro = tipo === "gasto" ? "Gastos" : "Ingresos";
+  return `${cliente} · ${libro}: ${n} ${n === 1 ? "factura" : "facturas"} por revisar`;
 }
 
 // ---------------------------------------------------------------------------

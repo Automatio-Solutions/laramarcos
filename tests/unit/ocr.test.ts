@@ -278,7 +278,19 @@ test("generarExcelAplifisa: hoja importable + pendientes aparte", async () => {
   assert.equal(libro.getCell("H4").numFmt, "0.00");
   assert.equal(libro.getCell("M5").value, 121);           // Total Factura
 
+  // Pendientes: rótulo rojo arriba, cabecera en la fila 2, y el Excel se abre en esta hoja.
   const pend = wb.getWorksheet("Pendientes de revisar")!;
-  assert.equal(pend.rowCount, 2);
-  assert.equal(pend.getCell("B2").value, "3");
+  assert.match(String(pend.getCell("A1").value), /FALTA 1 FACTURA POR REVISAR/);
+  assert.equal(pend.getCell("A2").value, COLUMNAS_APLIFISA[0]);
+  assert.equal(pend.getCell("B3").value, "3");
+  assert.equal(wb.views[0].activeTab, 1);
+  // El libro que se importa no lleva nada encima de la cabecera.
+  assert.equal(libro.getCell("A1").value, COLUMNAS_APLIFISA[0]);
+});
+
+test("generarExcelAplifisa: sin pendientes, una sola hoja y sin aviso", async () => {
+  const buf = await generarExcelAplifisa([{ ...VACIA, revisada: true, confianza: 100, archivo_nombre: null, numero_factura: "1" }]);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf as unknown as ArrayBuffer);
+  assert.equal(wb.worksheets.length, 1);
 });
