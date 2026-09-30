@@ -144,3 +144,4 @@ export async function ejecutarVigilancia(admin: SupabaseClient, hoy = hoyISO(), 
   });
   return { fecha: hoy, ...res, errores };
 }
+

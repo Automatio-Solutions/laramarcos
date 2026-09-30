@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { EstadoTarea } from "@/lib/types";
 import { resuelveMencionesComentario } from "@/lib/chat/core";
+import { notificar } from "@/lib/notificaciones";
 
 const ESTADOS: EstadoTarea[] = ["pendiente", "en_curso", "bloqueada", "completada"];
 const rev = (id: string) => revalidatePath(`/tareas/${id}`);
@@ -104,14 +105,14 @@ export async function addComentarioAction(tareaId: string, formData: FormData) {
   if (error) return; // sin comentario no hay avisos
 
   // AC-12: notificar in-app a cada persona mencionada (el autor ya está excluido)
-  for (const uid of menciones) {
-    await supabase.rpc("crear_notificacion", {
-      p_usuario: uid,
-      p_tipo: "mencion",
-      p_mensaje: `Te han mencionado en una tarea`,
-      p_enlace: `/tareas/${tareaId}`,
-    });
-  }
+  await notificar(
+    menciones.map((uid) => ({
+      usuario: uid,
+      tipo: "mencion",
+      mensaje: "Te han mencionado en una tarea",
+      enlace: `/tareas/${tareaId}`,
+    })),
+  );
   rev(tareaId);
 }
 

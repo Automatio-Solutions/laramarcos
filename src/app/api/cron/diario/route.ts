@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { autorizadoCron } from "@/lib/cron/auth";
+import { ejecutarLimpiezaChat } from "@/lib/chat/limpieza";
 import { ejecutarResumenFacturas } from "@/lib/ocr/avisos";
 import {
   ejecutarAlertas,
@@ -11,11 +12,11 @@ import {
 } from "@/lib/cron/tareas";
 
 /**
- * Despachador diario: ejecuta las cuatro tareas del despacho en una sola
+ * Despachador diario: ejecuta las tareas del despacho en una sola
  * invocación. Existe porque el plan gratuito de Vercel solo admite 2 cron jobs
  * con una ejecución al día; en lugar de repartirlas, se agrupan aquí.
  *
- * Orden deliberado: primero las tres tareas baratas (solo base de datos, ~1s
+ * Orden deliberado: primero las tareas baratas (base de datos y almacén, ~1s
  * cada una) y al final la vigilancia, que baja los boletines y llama a Claude.
  * Así, si se agota el tiempo, lo que se pierde es lo que se puede reintentar
  * mañana sin consecuencias, y nunca las notificaciones al equipo.
@@ -61,6 +62,7 @@ export async function GET(request: NextRequest) {
   await paso("resumen_diario", () => ejecutarResumenDiario(admin, hoy), salida);
   await paso("resumen_facturas", () => ejecutarResumenFacturas(admin), salida);
   await paso("presupuestos_recurrentes", () => ejecutarRecurrentes(admin, hoy), salida);
+  await paso("limpieza_chat", () => ejecutarLimpiezaChat(admin), salida);
 
   // La vigilancia solo entra si queda tiempo real para terminarla. Media
   // ejecución dejaría publicaciones guardadas sin su circular, y como el

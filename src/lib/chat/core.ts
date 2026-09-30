@@ -795,3 +795,27 @@ export function textoEscribiendo(nombres: string[]): string {
   if (n.length === 3) return `${n[0]}, ${n[1]} y ${n[2]} están escribiendo…`;
   return "Varias personas están escribiendo…";
 }
+
+/** Horas que se deja un fichero subido sin mensaje antes de considerarlo abandonado. */
+export const HORAS_ADJUNTO_HUERFANO = 24;
+
+/**
+ * Ficheros del almacén del chat que se pueden borrar: los que ningún mensaje usa y llevan
+ * más de `horas` subidos (el margen evita borrar uno que alguien está a punto de enviar).
+ * Se quedan los de fecha ilegible: ante la duda, no se borra.
+ */
+export function ficherosHuerfanos(
+  objetos: { ruta: string; creado: string | null }[],
+  usados: Set<string>,
+  ahora: Date,
+  horas = HORAS_ADJUNTO_HUERFANO,
+): string[] {
+  const limite = ahora.getTime() - horas * 3600_000;
+  return objetos
+    .filter((o) => !usados.has(o.ruta))
+    .filter((o) => {
+      const t = o.creado ? Date.parse(o.creado) : NaN;
+      return Number.isFinite(t) && t < limite;
+    })
+    .map((o) => o.ruta);
+}

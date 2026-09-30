@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { EstadoTarea } from "@/lib/types";
+import { notificar } from "@/lib/notificaciones";
 
 const ESTADOS: EstadoTarea[] = ["pendiente", "en_curso", "bloqueada", "completada"];
 
@@ -51,17 +52,17 @@ export async function updateEstadoTareaAction(id: string, estado: string) {
       .from("dependencias_tarea")
       .select("tarea:tareas!dependencias_tarea_tarea_id_fkey(id, titulo, responsable_id)")
       .eq("depende_de_id", id);
-    for (const d of deps ?? []) {
-      const dep = d.tarea as unknown as { id: string; titulo: string; responsable_id: string | null } | null;
-      if (dep?.responsable_id) {
-        await supabase.rpc("crear_notificacion", {
-          p_usuario: dep.responsable_id,
-          p_tipo: "desbloqueo",
-          p_mensaje: `Desbloqueada (predecesora completada): ${dep.titulo}`,
-          p_enlace: `/tareas/${dep.id}`,
-        });
-      }
-    }
+    await notificar(
+      (deps ?? [])
+        .map((d) => d.tarea as unknown as { id: string; titulo: string; responsable_id: string | null } | null)
+        .filter((dep): dep is { id: string; titulo: string; responsable_id: string } => !!dep?.responsable_id)
+        .map((dep) => ({
+          usuario: dep.responsable_id,
+          tipo: "desbloqueo",
+          mensaje: `Desbloqueada (predecesora completada): ${dep.titulo}`,
+          enlace: `/tareas/${dep.id}`,
+        })),
+    );
   }
   revalidatePath("/tareas");
 }
