@@ -5,45 +5,84 @@
 // postgres_changes, así que el socket DEBE ir autenticado con el JWT del usuario:
 // si fuera con la clave anónima, no llegaría ningún evento.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { cargarPosteriores, obtenerNoLeidos } from "@/app/(panel)/chat/actions";
+import { MENSAJES_POR_RELLENO, mezclaMensajes } from "@/lib/chat/core";
 import type { Mensaje } from "@/lib/types";
 
 /** Evento de ventana que avisa de que han cambiado los no leídos (p. ej. tras marcar leída). */
-export const EVENTO_NO_LEIDOS = "chat:no-leidos";
+const EVENTO_NO_LEIDOS = "chat:no-leidos";
+
+/** Tope de páginas al rellenar un hueco (20 × 200 mensajes); a partir de ahí se deja de pedir. */
+const MAX_PAGINAS_RELLENO = 20;
 
 export function avisarNoLeidos() {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(EVENTO_NO_LEIDOS));
 }
 
-let preparado: Promise<SupabaseClient> | null = null;
+// ---- Conversación abierta (visible en esta pestaña) ----
+// La registra ChatConversacion; el badge no cuenta sus mensajes porque se están leyendo.
+
+let conversacionAbierta: string | null = null;
+const oyentesAbierta = new Set<() => void>();
+
+export function setConversacionAbierta(id: string | null) {
+  if (conversacionAbierta === id) return;
+  conversacionAbierta = id;
+  oyentesAbierta.forEach((f) => f());
+}
+
+/** Quita la conversación abierta solo si sigue siendo `id` (evita pisar a otra recién montada). */
+export function limpiarConversacionAbierta(id: string) {
+  if (conversacionAbierta === id) setConversacionAbierta(null);
+}
+
+function suscribirAbierta(f: () => void) {
+  oyentesAbierta.add(f);
+  return () => {
+    oyentesAbierta.delete(f);
+  };
+}
+
+const leerAbierta = () => conversacionAbierta;
+const leerAbiertaServidor = () => null;
+
+// ---- Cliente de navegador ----
+
+let cliente: SupabaseClient | null = null;
+
+/** Instancia única del cliente de navegador, con el oyente de sesión registrado una vez. */
+function clienteNavegador(): SupabaseClient {
+  if (!cliente) {
+    const supabase = createClient();
+    supabase.auth.onAuthStateChange((evento, s) => {
+      if (evento === "SIGNED_OUT") {
+        void supabase.removeAllChannels();
+        return;
+      }
+      if (s?.access_token && (evento === "TOKEN_REFRESHED" || evento === "SIGNED_IN")) {
+        void supabase.realtime.setAuth(s.access_token);
+      }
+    });
+    cliente = supabase;
+  }
+  return cliente;
+}
 
 /**
- * Cliente de navegador con Realtime autenticado (una sola vez por pestaña):
- * pasa el access_token de la sesión al socket y lo renueva en cada refresco de token.
+ * Cliente con Realtime autenticado para una suscripción nueva. El token NO se cachea:
+ * se lee la sesión actual (cookies) en cada suscripción y se pasa al socket, de modo que
+ * tras cerrar sesión y entrar con otro usuario en la misma pestaña se usa el token nuevo.
  */
-function clienteRealtime(): Promise<SupabaseClient> {
-  if (!preparado) {
-    preparado = (async () => {
-      const supabase = createClient();
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (session?.access_token) await supabase.realtime.setAuth(session.access_token);
-      supabase.auth.onAuthStateChange((evento, s) => {
-        if (s?.access_token && (evento === "TOKEN_REFRESHED" || evento === "SIGNED_IN")) {
-          void supabase.realtime.setAuth(s.access_token);
-        }
-      });
-      return supabase;
-    })().catch((e) => {
-      preparado = null;
-      throw e;
-    });
-  }
-  return preparado;
+async function clienteRealtime(): Promise<SupabaseClient> {
+  const supabase = clienteNavegador();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (session?.access_token) await supabase.realtime.setAuth(session.access_token);
+  return supabase;
 }
 
 let secuencia = 0;
@@ -75,16 +114,25 @@ export function useMensajesRealtime(
     let activo = true;
     let quitar: (() => void) | null = null;
 
+    // Pide páginas hasta que una venga incompleta (con tope), así un corte largo
+    // no deja un hueco permanente en el hilo.
     const rellenar = async () => {
-      const desde = ultimaRef.current();
+      let desde = ultimaRef.current();
       if (!desde) return;
+      let recuperados: Mensaje[] = [];
       try {
-        const r = await cargarPosteriores(conversacionId, desde);
-        if (activo && "mensajes" in r && r.mensajes.length > 0) {
-          onCambioRef.current({ tipo: "upsert", mensajes: r.mensajes });
+        for (let i = 0; i < MAX_PAGINAS_RELLENO && activo; i++) {
+          const r = await cargarPosteriores(conversacionId, desde);
+          if (!("mensajes" in r)) break;
+          recuperados = mezclaMensajes(recuperados, r.mensajes);
+          if (r.mensajes.length < MENSAJES_POR_RELLENO) break;
+          desde = r.mensajes[r.mensajes.length - 1].created_at;
         }
       } catch {
-        // Sin red: se reintentará en la siguiente reconexión.
+        // Sin red: se entrega lo recuperado y se reintentará en la siguiente reconexión.
+      }
+      if (activo && recuperados.length > 0) {
+        onCambioRef.current({ tipo: "upsert", mensajes: recuperados });
       }
     };
 
@@ -138,6 +186,8 @@ export function useMensajesRealtime(
 /**
  * Llama a `alCambiar` (con debounce de 300 ms) cuando llega un mensaje a cualquier
  * conversación visible (la RLS filtra los eventos) o cuando se dispara `chat:no-leidos`.
+ * Tras una reconexión del canal, al volver la red o al volver a ver la pestaña también
+ * refresca, por si se perdieron eventos durante el corte.
  */
 export function useAvisoMensajes(alCambiar: () => void) {
   const alCambiarRef = useRef(alCambiar);
@@ -160,42 +210,64 @@ export function useAvisoMensajes(alCambiar: () => void) {
     clienteRealtime()
       .then((supabase) => {
         if (!activo) return;
+        let primeraSuscripcion = true;
         const canal = supabase
           .channel(nombreCanal("mensajes-nuevos"))
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "mensajes" }, programar)
-          .subscribe();
+          .subscribe((estado) => {
+            if (estado !== "SUBSCRIBED") return;
+            // El primero no hace falta (el valor inicial viene del servidor);
+            // los siguientes son reconexiones y pueden haber perdido eventos.
+            if (primeraSuscripcion) primeraSuscripcion = false;
+            else programar();
+          });
         quitar = () => void supabase.removeChannel(canal);
       })
       .catch((e) => console.error("[chat] realtime", e));
 
+    const alVolverVisible = () => {
+      if (document.visibilityState === "visible") programar();
+    };
+
     window.addEventListener(EVENTO_NO_LEIDOS, programar);
     window.addEventListener("online", programar);
+    document.addEventListener("visibilitychange", alVolverVisible);
     return () => {
       activo = false;
       if (temporizador) clearTimeout(temporizador);
       window.removeEventListener(EVENTO_NO_LEIDOS, programar);
       window.removeEventListener("online", programar);
+      document.removeEventListener("visibilitychange", alVolverVisible);
       quitar?.();
     };
   }, []);
 }
 
-/** UC-604: no leídos por conversación y total, siempre al día. */
+/**
+ * UC-604: no leídos por conversación y total, siempre al día. El total excluye la
+ * conversación abierta en esta pestaña (se está leyendo), igual que la bandeja.
+ */
 export function useNoLeidos(inicial: number) {
-  const [estado, setEstado] = useState<{ porConversacion: Record<string, number>; total: number }>(
-    { porConversacion: {}, total: inicial },
-  );
+  const [porConversacion, setPorConversacion] = useState<Record<string, number> | null>(null);
+  const abierta = useSyncExternalStore(suscribirAbierta, leerAbierta, leerAbiertaServidor);
+
   useAvisoMensajes(() => {
     obtenerNoLeidos()
-      .then(({ filas, total }) =>
-        setEstado({
-          porConversacion: Object.fromEntries(filas.map((f) => [f.conversacion_id, f.no_leidos])),
-          total,
-        }),
+      .then(({ filas }) =>
+        setPorConversacion(Object.fromEntries(filas.map((f) => [f.conversacion_id, f.no_leidos]))),
       )
       .catch(() => {
         // Sin red: se mantiene el último valor conocido.
       });
   });
-  return estado;
+
+  // Hasta la primera carga en cliente solo tenemos el total del servidor.
+  const total =
+    porConversacion === null
+      ? inicial
+      : Object.entries(porConversacion).reduce(
+          (acc, [id, n]) => (id === abierta || n <= 0 ? acc : acc + n),
+          0,
+        );
+  return { porConversacion: porConversacion ?? {}, total };
 }

@@ -3,6 +3,8 @@
 
 /** Mensajes que se cargan por página al paginar hacia atrás. */
 export const MENSAJES_POR_PAGINA = 50;
+/** Tamaño de página al rellenar el hueco tras una reconexión de Realtime. */
+export const MENSAJES_POR_RELLENO = 200;
 
 /** Longitud máxima de un mensaje, en caracteres. */
 export const MAX_LONGITUD_MENSAJE = 5000;
@@ -83,16 +85,6 @@ export function filtraDirectorio<T extends { nombre: string }>(lista: T[], q: st
   const nq = normalizaBusqueda(q);
   if (!nq) return lista.slice();
   return lista.filter((x) => normalizaBusqueda(x.nombre).includes(nq));
-}
-
-/**
- * Par ordenado de participantes de una conversación directa (menor primero).
- * Usa comparación de cadenas simple, que coincide con el orden de uuid de Postgres
- * para uuids hexadecimales en minúsculas. Lanza error si ambos ids son iguales.
- */
-export function parDirecto(a: string, b: string): [string, string] {
-  if (a === b) throw new Error("Una conversación directa necesita dos usuarios distintos.");
-  return a < b ? [a, b] : [b, a];
 }
 
 /**

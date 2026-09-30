@@ -1,6 +1,7 @@
 import "server-only";
 import { unstable_rethrow } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { MENSAJES_POR_RELLENO } from "@/lib/chat/core";
 import type {
   CompaneroDirectorio,
   Conversacion,
@@ -160,12 +161,13 @@ export async function getDirectorio(): Promise<CompaneroDirectorio[]> {
 
 /**
  * Mensajes posteriores a `despuesDe` (ISO), en orden cronológico y con el nombre
- * del autor. Sirve para rellenar el hueco tras una reconexión de Realtime.
+ * del autor, como mucho `limite`. Sirve para rellenar el hueco tras una reconexión de
+ * Realtime: si la página viene llena, el cliente pide la siguiente (ver realtime.ts).
  */
 export async function listMensajesPosteriores(
   convId: string,
   despuesDe: string,
-  limite = 200,
+  limite = MENSAJES_POR_RELLENO,
 ): Promise<Mensaje[]> {
   const supabase = await createClient();
   const { data, error } = await supabase

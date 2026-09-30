@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cargarAnteriores, enviarMensaje, marcarLeida, resolverNombres } from "@/app/(panel)/chat/actions";
 import { MENSAJES_POR_PAGINA, agrupaPorDia, etiquetaDia, mezclaMensajes } from "@/lib/chat/core";
-import { avisarNoLeidos, useMensajesRealtime, type CambioMensaje } from "@/lib/chat/realtime";
+import {
+  avisarNoLeidos,
+  limpiarConversacionAbierta,
+  setConversacionAbierta,
+  useMensajesRealtime,
+  type CambioMensaje,
+} from "@/lib/chat/realtime";
 import type { Mensaje } from "@/lib/types";
 import { ChatComposer } from "./ChatComposer";
 import { ChatMensaje, type MensajeUI } from "./ChatMensaje";
@@ -77,6 +83,20 @@ export function ChatConversacion({
     if (temporizadorLeida.current) clearTimeout(temporizadorLeida.current);
     temporizadorLeida.current = setTimeout(marcar, 500);
   }, [marcar]);
+
+  // Conversación abierta y visible: el badge global no cuenta sus mensajes (se están leyendo).
+  useEffect(() => {
+    const registrar = () =>
+      document.visibilityState === "visible"
+        ? setConversacionAbierta(conversacionId)
+        : limpiarConversacionAbierta(conversacionId);
+    registrar();
+    document.addEventListener("visibilitychange", registrar);
+    return () => {
+      document.removeEventListener("visibilitychange", registrar);
+      limpiarConversacionAbierta(conversacionId);
+    };
+  }, [conversacionId]);
 
   useEffect(() => {
     marcar();

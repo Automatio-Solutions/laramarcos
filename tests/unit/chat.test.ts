@@ -8,7 +8,6 @@ import {
   formatoHoraMensaje,
   mezclaMensajes,
   normalizaBusqueda,
-  parDirecto,
   totalNoLeidos,
   validaTextoMensaje,
 } from "../../src/lib/chat/core.ts";
@@ -36,16 +35,6 @@ test("filtraDirectorio: insensible a mayúsculas y tildes; vacío devuelve todo"
   assert.deepEqual(filtraDirectorio(lista, "zzz"), []);
   assert.deepEqual(filtraDirectorio(lista, ""), lista);
   assert.deepEqual(filtraDirectorio(lista, "   "), lista);
-});
-
-test("parDirecto: par ordenado independiente del orden; mismo id lanza", () => {
-  const a = "0a1b2c3d-0000-4000-8000-000000000001";
-  const b = "f0e1d2c3-0000-4000-8000-000000000002";
-  assert.deepEqual(parDirecto(a, b), [a, b]);
-  assert.deepEqual(parDirecto(b, a), [a, b]);
-  // dígitos antes que letras, como en el orden de uuid de Postgres
-  assert.deepEqual(parDirecto("aaaa", "9999"), ["9999", "aaaa"]);
-  assert.throws(() => parDirecto(a, a));
 });
 
 test("formatoHoraMensaje: hoy, ayer, mismo año y otro año (Madrid)", () => {
