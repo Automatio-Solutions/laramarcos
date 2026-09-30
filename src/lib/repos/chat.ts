@@ -5,6 +5,8 @@ import { MENSAJES_POR_RELLENO } from "@/lib/chat/core";
 import { ESTADO_LABEL } from "@/lib/estados";
 import type {
   CompaneroDirectorio,
+  ResultadoBusqueda,
+  Rol,
   Conversacion,
   ConversacionListada,
   EstadoTarea,
@@ -18,10 +20,38 @@ import type {
 
 const SELECT_CONV =
   "id,tipo,nombre,oficina,cliente_id,usuario_a,usuario_b,ultimo_mensaje_at";
-const SELECT_MENSAJE =
+const SELECT_MENSAJE_BASE =
   "id,conversacion_id,autor_id,texto,menciones,editado_at,borrado,created_at";
+/** UC-610: columnas del adjunto (migración 0023). */
+const SELECT_MENSAJE = `${SELECT_MENSAJE_BASE},adjunto_path,adjunto_nombre,adjunto_mime,adjunto_size`;
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
+
+/** ¿El error es de una columna que aún no existe (migración 0023 sin aplicar)? */
+export function esErrorColumna(e: { code?: string; message?: string } | null | undefined): boolean {
+  if (!e) return false;
+  return e.code === "42703" || e.code === "PGRST204" || /column .* does not exist/i.test(e.message ?? "");
+}
+
+/** Hasta cuándo se consulta sin las columnas del adjunto tras detectar que no existen. */
+let sinAdjuntosHasta = 0;
+
+/**
+ * Ejecuta una consulta de mensajes con las columnas del adjunto y, si aún no existen
+ * (0023 sin aplicar), la repite sin ellas: el chat nunca se rompe por la migración. La
+ * ausencia se recuerda 1 minuto para no duplicar consultas; luego se vuelve a probar.
+ */
+export async function conColumnasMensaje<R extends { error: { code?: string; message?: string } | null }>(
+  consulta: (columnas: string) => PromiseLike<R>,
+): Promise<R> {
+  if (Date.now() >= sinAdjuntosHasta) {
+    const r = await consulta(SELECT_MENSAJE);
+    if (!esErrorColumna(r.error)) return r;
+    console.warn("[chat] columnas de adjunto no disponibles (¿migración 0023 sin aplicar?)");
+    sinAdjuntosHasta = Date.now() + 60_000;
+  }
+  return consulta(SELECT_MENSAJE_BASE);
+}
 
 /** Nombres por id, incluidos usuarios dados de baja (mensajes antiguos). */
 async function resolverNombres(
@@ -232,18 +262,19 @@ export async function listMensajes(
   { antesDe, limite = 50 }: { antesDe?: string; limite?: number } = {},
 ): Promise<Mensaje[]> {
   const supabase = await createClient();
-  let query = supabase
-    .from("mensajes")
-    .select(SELECT_MENSAJE)
-    .eq("conversacion_id", convId)
-    .order("created_at", { ascending: false })
-    .order("id", { ascending: false })
-    .limit(limite);
-  if (antesDe) query = query.lt("created_at", antesDe);
-
-  const { data, error } = await query;
+  const { data, error } = await conColumnasMensaje((cols) => {
+    let query = supabase
+      .from("mensajes")
+      .select(cols)
+      .eq("conversacion_id", convId)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(limite);
+    if (antesDe) query = query.lt("created_at", antesDe);
+    return query;
+  });
   if (error) throw error;
-  const mensajes = ((data ?? []) as Mensaje[]).reverse();
+  const mensajes = ((data ?? []) as unknown as Mensaje[]).reverse();
 
   const nombres = await resolverNombres(
     supabase,
@@ -274,16 +305,18 @@ export async function listMensajesPosteriores(
   limite = MENSAJES_POR_RELLENO,
 ): Promise<Mensaje[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("mensajes")
-    .select(SELECT_MENSAJE)
-    .eq("conversacion_id", convId)
-    .gt("created_at", despuesDe)
-    .order("created_at", { ascending: true })
-    .order("id", { ascending: true })
-    .limit(limite);
+  const { data, error } = await conColumnasMensaje((cols) =>
+    supabase
+      .from("mensajes")
+      .select(cols)
+      .eq("conversacion_id", convId)
+      .gt("created_at", despuesDe)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .limit(limite),
+  );
   if (error) throw error;
-  const mensajes = (data ?? []) as Mensaje[];
+  const mensajes = (data ?? []) as unknown as Mensaje[];
   const nombres = await resolverNombres(
     supabase,
     mensajes.map((m) => m.autor_id).filter((id): id is string => !!id),
@@ -325,4 +358,60 @@ export async function totalNoLeidos(): Promise<number> {
     unstable_rethrow(e);
     return 0;
   }
+}
+
+/** Mensaje por id con la RLS del usuario (null si no existe o no lo puede ver). */
+export async function leerMensaje(id: string): Promise<Mensaje | null> {
+  const supabase = await createClient();
+  const { data, error } = await conColumnasMensaje((cols) =>
+    supabase.from("mensajes").select(cols).eq("id", id).maybeSingle(),
+  );
+  if (error) throw error;
+  return (data as unknown as Mensaje | null) ?? null;
+}
+
+/** ¿El usuario ve la conversación? (la RLS decide; sirve para autorizar subidas). */
+export async function conversacionVisible(id: string): Promise<boolean> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("conversaciones").select("id").eq("id", id).maybeSingle();
+  if (error) throw error;
+  return !!data;
+}
+
+/** Rol del usuario autenticado (para moderar en el chat). Nunca lanza: null si no se sabe. */
+export async function rolActual(): Promise<Rol | null> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return null;
+    const { data } = await supabase.from("usuarios").select("rol").eq("id", user.id).maybeSingle();
+    return ((data as { rol?: Rol } | null)?.rol ?? null) as Rol | null;
+  } catch (e) {
+    unstable_rethrow(e);
+    return null;
+  }
+}
+
+/**
+ * UC-611: mensajes que contienen el texto buscado, SOLO de conversaciones visibles para el
+ * usuario y no borrados, del más reciente al más antiguo (función chat_buscar), con el
+ * nombre del autor.
+ */
+export async function buscarMensajesTexto(q: string, limite: number): Promise<ResultadoBusqueda[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("chat_buscar", { p_q: q, p_limite: limite });
+  if (error) throw error;
+  const filas = (data ?? []) as Omit<ResultadoBusqueda, "autor_nombre">[];
+  const nombres = await resolverNombres(
+    supabase,
+    filas.map((f) => f.autor_id).filter((id): id is string => !!id),
+  );
+  return filas.map((f) => ({
+    ...f,
+    texto: f.texto ?? "",
+    adjunto_nombre: f.adjunto_nombre ?? null,
+    autor_nombre: f.autor_id ? (nombres.get(f.autor_id) ?? null) : null,
+  }));
 }

@@ -5,6 +5,7 @@ import {
   getDirectorio,
   listConversaciones,
   listMensajes,
+  rolActual,
   type ConversacionDetalle,
 } from "@/lib/repos/chat";
 import { MENSAJES_POR_PAGINA } from "@/lib/chat/core";
@@ -58,20 +59,21 @@ export default async function ChatConversacionPage({
   const valido = UUID.test(id);
   let datos;
   try {
-    const [conversaciones, conversacion, mensajes, directorio] = await Promise.all([
+    const [conversaciones, conversacion, mensajes, directorio, rol] = await Promise.all([
       listConversaciones(),
       valido ? getConversacion(id) : Promise.resolve(null),
       valido ? listMensajes(id, { limite: MENSAJES_POR_PAGINA }) : Promise.resolve([]),
       getDirectorio(),
+      rolActual(),
     ]);
-    datos = { conversaciones, conversacion, mensajes, directorio };
+    datos = { conversaciones, conversacion, mensajes, directorio, rol };
   } catch (e) {
     unstable_rethrow(e);
     console.error("[chat] /chat/[id]", e);
     return <Marco><ChatNoDisponible /></Marco>;
   }
 
-  const { conversaciones, conversacion, mensajes, directorio } = datos;
+  const { conversaciones, conversacion, mensajes, directorio, rol } = datos;
   const yoNombre = directorio.find((c) => c.id === user.id)?.nombre ?? "Yo";
   const nombres = Object.fromEntries(directorio.map((c) => [c.id, c.nombre]));
   const listada = conversaciones.find((c) => c.id === id);
@@ -99,6 +101,12 @@ export default async function ChatConversacionPage({
           mensajesIniciales={mensajes}
           yo={{ id: user.id, nombre: yoNombre }}
           nombresIniciales={nombres}
+          rol={rol}
+          contactoId={
+            conversacion.tipo === "directo"
+              ? (conversacion.usuario_a === user.id ? conversacion.usuario_b : conversacion.usuario_a)
+              : null
+          }
         />
       ) : (
         // UC-603 AC-04: sin acceso (o inexistente) la RLS no devuelve nada.

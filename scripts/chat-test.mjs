@@ -5,6 +5,9 @@
 // Fase 2 (0021): miembros de una conversación, apertura del hilo de cliente,
 // cambio de oficina y visibilidad de comentarios de tareas.
 // 0022: escritura de comentarios solo si se ve la tarea y tarea_quienes_ven.
+// Fase 3 (0023): adjuntos (checks + bucket 'chat'), búsqueda sin tildes
+// (chat_buscar), edición/borrado (política + trigger + auditoría) y canales
+// privados de Realtime (presencia / escribiendo).
 //
 // Todo ocurre en UNA transacción que SIEMPRE se revierte. Las migraciones del
 // chat que aún no figuren en public._migrations se ejecutan dentro de esa misma
@@ -21,7 +24,7 @@ import { dirname, join } from 'node:path';
 import pg from 'pg';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const MIGRACIONES = ['0020_chat.sql', '0021_chat_fase2.sql', '0022_comentarios_insert.sql'];
+const MIGRACIONES = ['0020_chat.sql', '0021_chat_fase2.sql', '0022_comentarios_insert.sql', '0023_chat_fase3.sql'];
 const rutaMigracion = (f) => join(__dirname, '..', 'supabase', 'migrations', f);
 
 const url = process.env.SUPABASE_DB_URL;
@@ -476,6 +479,240 @@ try {
   // --- Auditoría ---
   const audit = await q(`select count(*)::int as n from public.auditoria where tabla = 'mensajes' and registro_id = $1`, [mOpt]);
   check('Auditoría · el mensaje queda registrado', audit.rows[0].n === 1);
+
+  // ==========================================================================
+  // Fase 3 (0023) · UC-610..UC-613
+  // ==========================================================================
+  // El asesor de Badajoz vuelve a su sede (la sección de cambio de oficina lo movió).
+  await q(`update public.usuarios set oficina = 'Badajoz' where id = $1`, [asesorBdj]);
+  const cBdj = canal('Badajoz'), cCas = canal('Castuera');
+  const insMsg = (cols, vals) => codigoError(
+    `insert into public.mensajes (${cols.join(', ')}) values (${cols.map((_, i) => `$${i + 1}`).join(', ')})`, vals);
+  const PDF = 'application/pdf';
+
+  // --- UC-610 · Adjuntos ---
+  await asUser(asesorBdj);
+  const colsAdj = ['conversacion_id', 'autor_id', 'texto', 'adjunto_path', 'adjunto_nombre', 'adjunto_mime', 'adjunto_size'];
+  const pathOk = `${cBdj}/${randomUUID()}/Nomina_enero.pdf`;
+  check('Adjuntos · tipo MIME no permitido → rechazado (23514)',
+    (await insMsg(colsAdj, [cBdj, asesorBdj, '', `${cBdj}/${randomUUID()}/x.zip`, 'x.zip', 'application/zip', 100])) === '23514');
+  check('Adjuntos · más de 20 MB → rechazado (23514)',
+    (await insMsg(colsAdj, [cBdj, asesorBdj, '', `${cBdj}/${randomUUID()}/g.pdf`, 'g.pdf', PDF, 20971521])) === '23514');
+  check('Adjuntos · ruta fuera de la carpeta de su conversación → rechazado (23514)',
+    (await insMsg(colsAdj, [cBdj, asesorBdj, '', `${cCas}/${randomUUID()}/x.pdf`, 'x.pdf', PDF, 100])) === '23514');
+  check('Adjuntos · ruta con ".." → rechazado (23514)',
+    (await insMsg(colsAdj, [cBdj, asesorBdj, '', `${cBdj}/../${cCas}/x.pdf`, 'x.pdf', PDF, 100])) === '23514');
+  check('Adjuntos · adjunto incompleto (sin mime ni tamaño) → rechazado (23514)',
+    (await insMsg(['conversacion_id', 'autor_id', 'texto', 'adjunto_path', 'adjunto_nombre'],
+      [cBdj, asesorBdj, '', pathOk, 'Nomina_enero.pdf'])) === '23514');
+  const mAdj = randomUUID();
+  check('Adjuntos · texto vacío + adjunto válido (20 MB justos) → permitido',
+    (await insMsg(['id', ...colsAdj], [mAdj, cBdj, asesorBdj, '', pathOk, 'Nomina enero.pdf', PDF, 20971520])) === null);
+  check('Adjuntos · texto vacío (solo espacios) sin adjunto → rechazado (23514)',
+    (await insMsg(['conversacion_id', 'autor_id', 'texto'], [cBdj, asesorBdj, '   '])) === '23514');
+  check('Adjuntos · Excel y Word también se admiten',
+    (await insMsg(colsAdj, [cBdj, asesorBdj, 'hoja', `${cBdj}/${randomUUID()}/a.xlsx`, 'a.xlsx',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 10])) === null &&
+    (await insMsg(colsAdj, [cBdj, asesorBdj, 'doc', `${cBdj}/${randomUUID()}/a.doc`, 'a.doc', 'application/msword', 10])) === null);
+  await asSuperuser();
+  const bucket = (await q(`select public, file_size_limit, allowed_mime_types from storage.buckets where id = 'chat'`)).rows[0];
+  check('Adjuntos · bucket "chat" existe, privado, 20 MB y 9 tipos MIME',
+    !!bucket && bucket.public === false && Number(bucket.file_size_limit) === 20971520 &&
+    bucket.allowed_mime_types?.length === 9 && bucket.allowed_mime_types.includes(PDF));
+  const polObj = await q(`select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects'
+                           and (qual ilike '%''chat''%' or with_check ilike '%''chat''%')`);
+  check('Adjuntos · sin políticas de storage.objects para el bucket "chat" (solo servidor)', polObj.rowCount === 0);
+
+  // --- UC-611 · Búsqueda ---
+  // Como owner (sin auth.uid()) para fijar created_at y probar el orden.
+  const [mA, mB, mC, mDel] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+  await q(`insert into public.mensajes (id, conversacion_id, autor_id, texto, created_at) values
+           ($1, $5, $6, 'Revisar la facturación de marzo', now() - interval '3 minutes'),
+           ($2, $5, $6, 'Otra FACTURACIÓN pendiente',      now() - interval '1 minute'),
+           ($3, $7, $8, 'Facturación de Castuera',         now() - interval '2 minutes'),
+           ($4, $5, $6, 'Facturación que se borrará',      now() - interval '30 seconds')`,
+    [mA, mB, mC, mDel, cBdj, asesorBdj, cCas, asesorCas]);
+  await q('update public.mensajes set borrado = true where id = $1', [mDel]);
+  const buscar = async (quien, texto, limite) => {
+    await asUser(quien);
+    const r = limite === undefined
+      ? await q('select * from public.chat_buscar($1)', [texto])
+      : await q('select * from public.chat_buscar($1, $2)', [texto, limite]);
+    await asSuperuser();
+    return r.rows;
+  };
+  const rBdj = (await buscar(asesorBdj, 'facturacion')).map((r) => r.id);
+  check('Búsqueda · "facturacion" encuentra "facturación"/"FACTURACIÓN" (sin tildes ni mayúsculas)',
+    rBdj.includes(mA) && rBdj.includes(mB));
+  check('Búsqueda · más recientes primero', rBdj.indexOf(mB) >= 0 && rBdj.indexOf(mB) < rBdj.indexOf(mA));
+  check('Búsqueda · un mensaje borrado no aparece', !rBdj.includes(mDel));
+  check('Búsqueda · asesor Badajoz NO obtiene resultados del canal de Castuera', !rBdj.includes(mC));
+  const rCas = (await buscar(asesorCas, 'facturación')).map((r) => r.id);
+  check('Búsqueda · asesor Castuera NO obtiene resultados del canal de Badajoz',
+    rCas.includes(mC) && !rCas.includes(mA) && !rCas.includes(mB));
+  const rResp = (await buscar(resp, 'Facturacion')).map((r) => r.id);
+  check('Búsqueda · el responsable encuentra en todas las oficinas', [mA, mB, mC].every((id) => rResp.includes(id)));
+  const rAdj = await buscar(asesorBdj, 'nomina');
+  check('Búsqueda · encuentra por el nombre del adjunto y devuelve adjunto_nombre',
+    rAdj.some((r) => r.id === mAdj && r.adjunto_nombre === 'Nomina enero.pdf'));
+  const cols = Object.keys((await buscar(asesorBdj, 'facturacion'))[0] ?? {}).sort().join(',');
+  check('Búsqueda · columnas del contrato (id, conversacion_id, autor_id, texto, created_at, adjunto_nombre)',
+    cols === 'adjunto_nombre,autor_id,conversacion_id,created_at,id,texto');
+  check('Búsqueda · consulta en blanco o de 1 carácter → 0 filas',
+    (await buscar(asesorBdj, '   ')).length === 0 && (await buscar(asesorBdj, 'f')).length === 0 &&
+    (await buscar(asesorBdj, null)).length === 0);
+  check('Búsqueda · respeta el límite', (await buscar(asesorBdj, 'facturacion', 1)).length === 1);
+  check('Búsqueda · usuario inactivo → 0 filas', (await buscar(inactivo, 'facturacion')).length === 0);
+  const idxBus = await q(`select 1 from pg_indexes where schemaname = 'public' and tablename = 'mensajes' and indexname = 'idx_mensajes_busqueda'`);
+  check('Búsqueda · índice GIN sobre mensajes.busqueda', idxBus.rowCount === 1);
+  await asUser(asesorBdj);
+  check('Búsqueda · anon no puede ejecutar chat_buscar',
+    (await q(`select has_function_privilege('anon', 'public.chat_buscar(text,int)', 'execute') as v`)).rows[0].v === false);
+  await asSuperuser();
+
+  // --- UC-612 · Editar / borrar ---
+  const mE = randomUUID(), mG = randomUUID();
+  await asUser(asesorBdj);
+  await q(`insert into public.mensajes (id, conversacion_id, autor_id, texto, menciones) values ($1,$2,$3,'Texto original', $4::uuid[])`,
+    [mE, cBdj, asesorBdj, [resp]]);
+  await q(`insert into public.mensajes (id, conversacion_id, autor_id, texto, menciones) values ($1,$2,$3,'Mensaje en General', $4::uuid[])`,
+    [mG, general, asesorBdj, [asesorCas]]);
+  const upd = await q(`update public.mensajes set texto = 'Texto editado' where id = $1 returning texto, editado_at`, [mE]);
+  check('Editar · el autor edita su mensaje: texto actualizado y editado_at marcado',
+    upd.rowCount === 1 && upd.rows[0].texto === 'Texto editado' && upd.rows[0].editado_at !== null);
+  const antes = upd.rows[0].editado_at;
+  const upd2 = await q(`update public.mensajes set editado_at = '2000-01-01' where id = $1 returning editado_at`, [mE]);
+  check('Editar · editado_at no lo fija el cliente', upd2.rows[0].editado_at.getTime() === antes.getTime());
+  check('Editar · no se puede dejar sin texto un mensaje sin adjunto (23514)',
+    (await codigoError(`update public.mensajes set texto = '  ' where id = $1`, [mE])) === '23514');
+  check('Editar · no se puede cambiar de conversación (42501)',
+    (await codigoError('update public.mensajes set conversacion_id = $2 where id = $1', [mE, general])) === '42501');
+  check('Editar · no se pueden cambiar las menciones (42501)',
+    (await codigoError(`update public.mensajes set menciones = '{}' where id = $1`, [mE])) === '42501');
+  check('Editar · no se puede cambiar la fecha (42501)',
+    (await codigoError(`update public.mensajes set created_at = now() - interval '1 day' where id = $1`, [mE])) === '42501');
+  check('Editar · no se puede cambiar el adjunto (42501)',
+    (await codigoError(`update public.mensajes set adjunto_nombre = 'otro.pdf' where id = $1`, [mAdj])) === '42501');
+  const rEd = ids(await q('select id from public.chat_buscar($1)', ['editado']));
+  check('Editar · la búsqueda refleja el texto editado', rEd.includes(mE) &&
+    !ids(await q('select id from public.chat_buscar($1)', ['original'])).includes(mE));
+  await asSuperuser();
+
+  await asUser(asesorCas);  // ve General, no es autor ni staff
+  const ajeno = await q(`update public.mensajes set texto = 'hackeado' where id = $1`, [mG]);
+  check('Editar · un compañero (no autor, no staff) NO puede editar → 0 filas', ajeno.rowCount === 0);
+  const ajenoBorra = await q(`update public.mensajes set borrado = true where id = $1`, [mG]);
+  check('Borrar · un compañero (no autor, no staff) NO puede borrar → 0 filas', ajenoBorra.rowCount === 0);
+  const noVe = await q(`update public.mensajes set borrado = true where id = $1`, [mE]);
+  check('Borrar · quien no ve la conversación NO puede borrar → 0 filas', noVe.rowCount === 0);
+  await asSuperuser();
+
+  await asUser(resp);
+  check('Editar · el staff NO puede editar el texto de otro (42501)',
+    (await codigoError(`update public.mensajes set texto = 'moderado' where id = $1`, [mG])) === '42501');
+  check('Editar · el staff NO puede reasignar el autor (42501)',
+    (await codigoError('update public.mensajes set autor_id = $2 where id = $1', [mG, resp])) === '42501');
+  const mod = await q(`update public.mensajes set borrado = true where id = $1
+                       returning texto, menciones, borrado, editado_at`, [mG]);
+  check('Borrar · el staff SÍ puede borrar un mensaje ajeno: texto y menciones vaciados, editado_at intacto',
+    mod.rowCount === 1 && mod.rows[0].borrado && mod.rows[0].texto === '' &&
+    mod.rows[0].menciones.length === 0 && mod.rows[0].editado_at === null);
+  await asSuperuser();
+
+  await asUser(asesorBdj);
+  const delAdj = await q(`update public.mensajes set borrado = true where id = $1
+                          returning texto, adjunto_path, adjunto_nombre, adjunto_mime, adjunto_size`, [mAdj]);
+  const d = delAdj.rows[0];
+  check('Borrar · el autor borra su mensaje con adjunto: texto y adjunto_* vaciados',
+    delAdj.rowCount === 1 && d.texto === '' && d.adjunto_path === null && d.adjunto_nombre === null &&
+    d.adjunto_mime === null && d.adjunto_size === null);
+  check('Borrar · no se puede des-borrar (42501)',
+    (await codigoError('update public.mensajes set borrado = false where id = $1', [mAdj])) === '42501');
+  check('Borrar · un mensaje borrado no se puede editar (42501)',
+    (await codigoError(`update public.mensajes set texto = 'resucitado' where id = $1`, [mAdj])) === '42501');
+  check('Borrar · el adjunto borrado ya no aparece en la búsqueda',
+    !ids(await q('select id from public.chat_buscar($1)', ['nomina'])).includes(mAdj));
+  await asSuperuser();
+
+  const audE = await q(`select diff from public.auditoria
+                         where tabla = 'mensajes' and registro_id = $1 and operacion = 'UPDATE'
+                         order by id`, [mE]);
+  check('Auditoría · la edición queda registrada con el texto anterior y el nuevo',
+    audE.rows.some((r) => r.diff?.old?.texto === 'Texto original' && r.diff?.new?.texto === 'Texto editado'));
+  const audG = await q(`select usuario_id, diff from public.auditoria
+                         where tabla = 'mensajes' and registro_id = $1 and operacion = 'UPDATE'`, [mG]);
+  check('Auditoría · el borrado queda registrado con el texto anterior y quién lo hizo',
+    audG.rows.some((r) => r.usuario_id === resp && r.diff?.old?.texto === 'Mensaje en General' && r.diff?.new?.borrado === true));
+
+  // ON DELETE SET NULL de usuarios sigue funcionando pese al trigger de inmutabilidad.
+  const efimero = randomUUID(), mEf = randomUUID();
+  await q(`insert into auth.users (id, instance_id, aud, role, email, created_at, updated_at)
+           values ($1, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'chat-efim@test.lm', now(), now())`, [efimero]);
+  await q(`insert into public.usuarios (id, email, nombre, rol, oficina, activo) values ($1,'chat-efim@test.lm','ZZ Chat Efímero','asesor','Badajoz', true)`, [efimero]);
+  await q(`insert into public.mensajes (id, conversacion_id, autor_id, texto) values ($1,$2,$3,'adiós')`, [mEf, general, efimero]);
+  const errBaja = await codigoError('delete from public.usuarios where id = $1', [efimero]);
+  const trasBaja = await q('select autor_id from public.mensajes where id = $1', [mEf]);
+  check('Editar · borrar un usuario deja sus mensajes con autor_id null (FK SET NULL permitido)',
+    errBaja === null && trasBaja.rows[0]?.autor_id === null);
+
+  const pubUpd = await q(`select pubupdate from pg_publication where pubname = 'supabase_realtime'`);
+  check('Realtime · la publicación emite UPDATE (ediciones y borrados en vivo)',
+    pubUpd.rowCount === 0 || pubUpd.rows[0].pubupdate === true);
+
+  // --- UC-613 · Canales privados de Realtime (presencia / escribiendo) ---
+  const canalOk = async (quien, topic) => {
+    await asUser(quien);
+    const v = (await q('select public.chat_puede_usar_canal($1) as v', [topic])).rows[0].v;
+    await asSuperuser();
+    return v;
+  };
+  check('Realtime · miembro puede usar chat:<su canal>', (await canalOk(asesorBdj, `chat:${cBdj}`)) === true);
+  check('Realtime · miembro puede usar chat:<directo propio>', (await canalOk(asesorCas, `chat:${d1}`)) === true);
+  check('Realtime · NO miembro NO puede usar chat:<canal ajeno>', (await canalOk(asesorCas, `chat:${cBdj}`)) === false);
+  check('Realtime · staff NO puede usar chat:<directo ajeno>', (await canalOk(resp, `chat:${d1}`)) === false);
+  check('Realtime · topic mal formado → false (sin error)',
+    (await canalOk(asesorBdj, 'chat:no-es-un-uuid')) === false &&
+    (await canalOk(asesorBdj, `chat:${cBdj}' or 1=1`)) === false &&
+    (await canalOk(asesorBdj, 'chat:')) === false);
+  check('Realtime · topic desconocido o nulo → false',
+    (await canalOk(asesorBdj, 'otro')) === false && (await canalOk(asesorBdj, null)) === false);
+  check('Realtime · conversación inexistente → false', (await canalOk(asesorBdj, `chat:${randomUUID()}`)) === false);
+  check('Realtime · presencia: usuario activo → true', (await canalOk(asesorCas, 'presencia')) === true);
+  check('Realtime · presencia y chat: usuario inactivo → false',
+    (await canalOk(inactivo, 'presencia')) === false && (await canalOk(inactivo, `chat:${general}`)) === false);
+
+  const polRt = await q(`select policyname, cmd from pg_policies
+                          where schemaname = 'realtime' and tablename = 'messages'
+                            and policyname in ('chat_realtime_select', 'chat_realtime_insert')`);
+  check('Realtime · políticas select/insert creadas en realtime.messages', polRt.rowCount === 2);
+  // Política real: insertar/leer en realtime.messages con realtime.topic() fijado.
+  const rtIns = async (quien, topic, extension = 'broadcast') => {
+    await asUser(quien);
+    await q(`select set_config('realtime.topic', $1, true)`, [topic]);
+    const err = await codigoError(
+      `insert into realtime.messages (topic, extension, event, payload, private)
+       values ($1, $2, 'escribiendo', '{}'::jsonb, true)`, [topic, extension]);
+    const vistos = err === null
+      ? (await q(`select count(*)::int as n from realtime.messages where topic = $1`, [topic])).rows[0].n : 0;
+    await q(`select set_config('realtime.topic', '', true)`);
+    await asSuperuser();
+    return { err, vistos };
+  };
+  const rtMiembro = await rtIns(asesorBdj, `chat:${cBdj}`);
+  check('Realtime · miembro puede emitir y leer broadcast en chat:<su canal>',
+    rtMiembro.err === null && rtMiembro.vistos >= 1);
+  const rtAjeno = await rtIns(asesorCas, `chat:${cBdj}`);
+  check('Realtime · NO miembro NO puede emitir en chat:<canal ajeno> (42501)', rtAjeno.err === '42501');
+  const rtPres = await rtIns(asesorCas, 'presencia', 'presence');
+  check('Realtime · usuario activo puede usar presencia', rtPres.err === null);
+  const rtInac = await rtIns(inactivo, 'presencia', 'presence');
+  check('Realtime · usuario inactivo NO puede usar presencia (42501)', rtInac.err === '42501');
+  await asUser(asesorCas);
+  await q(`select set_config('realtime.topic', $1, true)`, [`chat:${cBdj}`]);
+  const leeAjeno = (await q(`select count(*)::int as n from realtime.messages where topic = $1`, [`chat:${cBdj}`])).rows[0].n;
+  await q(`select set_config('realtime.topic', '', true)`);
+  await asSuperuser();
+  check('Realtime · NO miembro NO lee los broadcast de chat:<canal ajeno>', leeAjeno === 0);
 
   await q('rollback');  // nada de esto persiste
   console.log(`\n${fail === 0 ? '✓' : '✗'} Chat interno: ${pass} ok, ${fail} fallidos`);

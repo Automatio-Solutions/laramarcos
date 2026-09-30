@@ -20,6 +20,25 @@ import {
   normalizaBusqueda,
   totalNoLeidos,
   validaTextoMensaje,
+  ACCEPT_ADJUNTO,
+  ERROR_TAMANO_ADJUNTO,
+  ERROR_TIPO_ADJUNTO,
+  MAX_BYTES_ADJUNTO,
+  esStaffChat,
+  etiquetaTipoAdjunto,
+  extractoBusqueda,
+  formatoTamano,
+  limpiaNombreAdjunto,
+  mimeAdjunto,
+  puedeBorrarMensaje,
+  puedeEditarMensaje,
+  resaltaCoincidencias,
+  saneaNombreAdjunto,
+  terminosBusqueda,
+  textoEscribiendo,
+  tipoAdjunto,
+  validaAdjunto,
+  validaAdjuntoMensaje,
 } from "../../src/lib/chat/core.ts";
 
 // "Ahora" fijo: miércoles 30-09-2026, 12:00 en Madrid (CEST, UTC+2).
@@ -322,4 +341,155 @@ test("mencionCompletada: no reabre el selector sobre una mención ya elegida", (
   assert.equal(mencionCompletada("Bruno", el), false);
   assert.equal(mencionCompletada("Bruno Pérezz", el), false);
   assert.equal(mencionCompletada("Bruno Pérez", []), false);
+});
+
+// ============================================================================
+// Fase 3
+// ============================================================================
+
+const CONV = "11111111-2222-4333-8444-555555555555";
+const OBJ = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+
+test("mimeAdjunto: manda la extensión; sin extensión acepta el tipo del navegador si es admitido", () => {
+  assert.equal(mimeAdjunto("Factura.PDF"), "application/pdf");
+  assert.equal(mimeAdjunto("foto.jpeg", ""), "image/jpeg");
+  assert.equal(
+    mimeAdjunto("libro.xlsx", "application/octet-stream"),
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  );
+  assert.equal(mimeAdjunto("carta.doc"), "application/msword");
+  assert.equal(mimeAdjunto("captura", "image/png"), "image/png");
+  assert.equal(mimeAdjunto("script.exe", "application/pdf"), null); // extensión desconocida con punto
+  assert.equal(mimeAdjunto("video.mp4", "video/mp4"), null);
+  assert.equal(mimeAdjunto("sin-extension"), null);
+  assert.ok(ACCEPT_ADJUNTO.includes(".pdf") && ACCEPT_ADJUNTO.includes(".docx"));
+});
+
+test("validaAdjunto: tipos permitidos, vacío y límite de 20 MB", () => {
+  assert.deepEqual(validaAdjunto("a.pdf", "application/pdf", 1000), { ok: true, mime: "application/pdf" });
+  assert.deepEqual(validaAdjunto("a.pdf", "", MAX_BYTES_ADJUNTO), { ok: true, mime: "application/pdf" });
+  assert.deepEqual(validaAdjunto("a.pdf", "", MAX_BYTES_ADJUNTO + 1), { ok: false, error: ERROR_TAMANO_ADJUNTO });
+  assert.deepEqual(validaAdjunto("a.zip", "application/zip", 10), { ok: false, error: ERROR_TIPO_ADJUNTO });
+  assert.equal(ERROR_TIPO_ADJUNTO, "Tipo de archivo no permitido: solo PDF, imágenes, Excel o Word.");
+  assert.equal(ERROR_TAMANO_ADJUNTO, "El archivo supera el límite de 20 MB.");
+  const vacio = validaAdjunto("a.png", "image/png", 0);
+  assert.equal(vacio.ok, false);
+});
+
+test("saneaNombreAdjunto / limpiaNombreAdjunto: clave ASCII segura y nombre visible limpio", () => {
+  assert.equal(saneaNombreAdjunto("Factura Ñandú 2026 (1).pdf"), "Factura_Nandu_2026_1_.pdf");
+  assert.equal(saneaNombreAdjunto("../../etc/passwd"), "passwd");
+  assert.equal(saneaNombreAdjunto("..."), "archivo");
+  const largo = saneaNombreAdjunto(`${"a".repeat(300)}.xlsx`);
+  assert.equal(largo.length, 100);
+  assert.ok(largo.endsWith(".xlsx"));
+  assert.equal(limpiaNombreAdjunto("C:\\docs\\Informe\u0007 final.docx "), "Informe final.docx");
+  const visible = limpiaNombreAdjunto(`${"b".repeat(400)}.pdf`);
+  assert.equal(visible.length, 255);
+  assert.ok(visible.endsWith(".pdf"));
+});
+
+test("validaAdjuntoMensaje: la ruta debe ser de esta conversación y el fichero admisible", () => {
+  const bueno = { path: `${CONV}/${OBJ}/informe.pdf`, nombre: "Informe.pdf", mime: "application/pdf", size: 2048 };
+  assert.deepEqual(validaAdjuntoMensaje(bueno, CONV), { ok: true, adjunto: bueno });
+  // Mayúsculas en el id de la conversación: se compara en minúsculas.
+  assert.equal(validaAdjuntoMensaje(bueno, CONV.toUpperCase()).ok, true);
+  const otraConv = "99999999-2222-4333-8444-555555555555";
+  assert.equal(validaAdjuntoMensaje(bueno, otraConv).ok, false);
+  assert.equal(validaAdjuntoMensaje({ ...bueno, path: `${CONV}/../x/informe.pdf` }, CONV).ok, false);
+  assert.equal(validaAdjuntoMensaje({ ...bueno, path: `${CONV}/informe.pdf` }, CONV).ok, false);
+  assert.equal(validaAdjuntoMensaje({ ...bueno, size: MAX_BYTES_ADJUNTO + 1 }, CONV).ok, false);
+  assert.equal(validaAdjuntoMensaje({ ...bueno, size: 1.5 }, CONV).ok, false);
+  assert.equal(validaAdjuntoMensaje({ ...bueno, nombre: "virus.exe" }, CONV).ok, false);
+  assert.equal(validaAdjuntoMensaje({ ...bueno, nombre: "  " }, CONV).ok, false);
+  assert.equal(validaAdjuntoMensaje(null, CONV).ok, false);
+  // El tipo guardado lo decide la extensión del nombre.
+  const r = validaAdjuntoMensaje({ ...bueno, nombre: "hoja.xls", mime: "application/pdf" }, CONV);
+  assert.ok(r.ok && r.adjunto.mime === "application/vnd.ms-excel");
+});
+
+test("tipoAdjunto / etiquetaTipoAdjunto / formatoTamano", () => {
+  assert.equal(etiquetaTipoAdjunto("application/pdf"), "PDF");
+  assert.equal(etiquetaTipoAdjunto("image/webp"), "Imagen");
+  assert.equal(etiquetaTipoAdjunto("application/vnd.ms-excel"), "Excel");
+  assert.equal(
+    etiquetaTipoAdjunto("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+    "Word",
+  );
+  assert.equal(tipoAdjunto(null), "otro");
+  assert.equal(formatoTamano(512), "512 B");
+  assert.equal(formatoTamano(340 * 1024), "340 KB");
+  assert.equal(formatoTamano(Math.round(1.2 * 1024 * 1024)), "1,2 MB");
+  assert.equal(formatoTamano(20 * 1024 * 1024), "20 MB");
+});
+
+test("validaTextoMensaje: vacío permitido solo si se pide (mensaje con adjunto)", () => {
+  assert.deepEqual(validaTextoMensaje("   ", true), { ok: true, texto: "" });
+  assert.equal(validaTextoMensaje("   ").ok, false);
+  assert.equal(validaTextoMensaje("x".repeat(5001), true).ok, false);
+});
+
+test("mezclaMensajes: un UPDATE de Realtime sin autor_nombre conserva el nombre conocido", () => {
+  type M = { id: string; created_at: string; texto: string; autor_nombre?: string | null };
+  const actual: M[] = [{ id: "a", created_at: "2026-09-30T10:00:00Z", autor_nombre: "Ana", texto: "hola" }];
+  const r = mezclaMensajes<M>(actual, [{ id: "a", created_at: "2026-09-30T10:00:00Z", texto: "hola!" }]);
+  assert.equal(r[0].autor_nombre, "Ana");
+  assert.equal(r[0].texto, "hola!");
+  const r2 = mezclaMensajes(actual, [{ id: "a", created_at: "2026-09-30T10:00:00Z", autor_nombre: "Ana M.", texto: "x" }]);
+  assert.equal(r2[0].autor_nombre, "Ana M.");
+});
+
+test("terminosBusqueda / resaltaCoincidencias: sin tildes ni mayúsculas, texto intacto", () => {
+  assert.deepEqual(terminosBusqueda("  José  a  NÓMINA "), ["nomina", "jose"]);
+  const t = resaltaCoincidencias("La nómina de José está lista", "jose nomina");
+  assert.equal(t.map((x) => x.texto).join(""), "La nómina de José está lista");
+  assert.deepEqual(
+    t.filter((x) => x.marca).map((x) => x.texto),
+    ["nómina", "José"],
+  );
+  // Plural en la búsqueda: marca también el singular (la BBDD busca por raíz).
+  assert.deepEqual(
+    resaltaCoincidencias("Revisa la factura", "facturas").filter((x) => x.marca).map((x) => x.texto),
+    ["factura"],
+  );
+  // Sin coincidencias o búsqueda vacía: un único trozo sin marcar.
+  assert.deepEqual(resaltaCoincidencias("hola", "zz"), [{ texto: "hola", marca: false }]);
+  assert.deepEqual(resaltaCoincidencias("hola", ""), [{ texto: "hola", marca: false }]);
+  // Coincidencias solapadas se unen.
+  const sol = resaltaCoincidencias("Modelo 303 trimestral", "modelo model");
+  assert.deepEqual(sol.filter((x) => x.marca).map((x) => x.texto), ["Modelo"]);
+});
+
+test("extractoBusqueda: corto intacto; largo centrado en la coincidencia con elipsis", () => {
+  assert.equal(extractoBusqueda("hola\n\nqué tal", "tal"), "hola qué tal");
+  const largo = `${"palabra ".repeat(40)}IVA trimestral pendiente ${"relleno ".repeat(40)}`;
+  const e = extractoBusqueda(largo, "iva", 80);
+  assert.ok(e.startsWith("…") && e.endsWith("…"), e);
+  assert.ok(e.includes("IVA trimestral"), e);
+  assert.ok(e.length <= 82, String(e.length));
+});
+
+test("puedeEditarMensaje / puedeBorrarMensaje / esStaffChat", () => {
+  const propio = { autor_id: "yo", borrado: false };
+  const ajeno = { autor_id: "otro", borrado: false };
+  assert.equal(puedeEditarMensaje(propio, "yo"), true);
+  assert.equal(puedeEditarMensaje(ajeno, "yo"), false);
+  assert.equal(puedeEditarMensaje({ ...propio, borrado: true }, "yo"), false);
+  assert.equal(puedeBorrarMensaje(propio, "yo", "asesor"), true);
+  assert.equal(puedeBorrarMensaje(ajeno, "yo", "asesor"), false);
+  assert.equal(puedeBorrarMensaje(ajeno, "yo", "responsable"), true);
+  assert.equal(puedeBorrarMensaje(ajeno, "yo", "admin"), true);
+  assert.equal(puedeBorrarMensaje({ ...ajeno, borrado: true }, "yo", "admin"), false);
+  assert.equal(puedeBorrarMensaje(propio, null, "admin"), false);
+  assert.equal(esStaffChat("asesor"), false);
+  assert.equal(esStaffChat(null), false);
+});
+
+test("textoEscribiendo: uno, dos, tres y varias personas", () => {
+  assert.equal(textoEscribiendo([]), "");
+  assert.equal(textoEscribiendo(["Ana"]), "Ana está escribiendo…");
+  assert.equal(textoEscribiendo(["Ana", "Bruno"]), "Ana y Bruno están escribiendo…");
+  assert.equal(textoEscribiendo(["Ana", "Ana"]), "Ana está escribiendo…");
+  assert.equal(textoEscribiendo(["Ana", "Bruno", "Carla"]), "Ana, Bruno y Carla están escribiendo…");
+  assert.equal(textoEscribiendo(["A", "B", "C", "D"]), "Varias personas están escribiendo…");
 });

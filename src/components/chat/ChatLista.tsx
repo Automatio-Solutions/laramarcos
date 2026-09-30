@@ -1,11 +1,14 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { listarConversaciones } from "@/app/(panel)/chat/actions";
-import { useAvisoMensajes } from "@/lib/chat/realtime";
+import { BUSQUEDA_MIN_CARACTERES } from "@/lib/chat/core";
+import { useAvisoMensajes, usePresencia } from "@/lib/chat/realtime";
 import type { CompaneroDirectorio, ConversacionListada } from "@/lib/types";
+import { ChatBusqueda } from "./ChatBusqueda";
 import { ChatDirectorio } from "./ChatDirectorio";
+import { PuntoConectado } from "./PuntoConectado";
 
 type Filtro = "todas" | "directos" | "canales" | "clientes";
 type Seccion = "canales" | "directos" | "clientes";
@@ -71,6 +74,16 @@ export function ChatLista({
   const [conversaciones, setConversaciones] = useState(iniciales);
   const [filtro, setFiltro] = useState<Filtro>("todas");
   const [directorioAbierto, setDirectorioAbierto] = useState(false);
+  const [q, setQ] = useState("");
+  const conectados = usePresencia();
+  const buscando = q.trim().length >= BUSQUEDA_MIN_CARACTERES;
+  const titulos = useMemo(
+    () => Object.fromEntries(conversaciones.map((c) => [c.id, c.titulo])),
+    [conversaciones],
+  );
+  /** En un directo, el otro participante. */
+  const otroDe = (c: ConversacionListada) =>
+    c.tipo === "directo" ? (c.usuario_a === yoId ? c.usuario_b : c.usuario_a) : null;
 
   // Mensaje nuevo en cualquier conversación visible o cambio de leídos → recarga la bandeja
   // (trae contadores, orden por actividad y directos que otro haya abierto conmigo).
@@ -113,6 +126,20 @@ export function ChatLista({
             Nuevo mensaje
           </button>
         </div>
+        <input
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setQ("");
+            }
+          }}
+          placeholder="Buscar en los mensajes…"
+          aria-label="Buscar en los mensajes"
+          className="w-full rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-fg outline-none placeholder:text-fg-muted focus:border-accent"
+        />
         <div role="group" aria-label="Filtrar conversaciones" className="flex rounded-md bg-surface-raised p-0.5">
           {FILTROS.map((f) => (
             <button
@@ -130,55 +157,69 @@ export function ChatLista({
         </div>
       </div>
 
-      <nav aria-label="Lista de conversaciones" className="min-h-0 flex-1 overflow-y-auto py-2">
-        {visibles.length === 0 && (
-          <p className="px-5 py-8 text-center text-sm text-fg-muted">{VACIO[filtro]}</p>
-        )}
-        {grupos.map((g) => (
-          <div key={g.id} className="mb-2">
-            {g.label && (
-              <h3 id={`chat-seccion-${g.id}`} className="px-5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
-                {g.label}
-              </h3>
-            )}
-            <ul className="space-y-0.5 px-2" aria-labelledby={g.label ? `chat-seccion-${g.id}` : undefined}>
-              {g.items.map((c) => {
-                const activa = c.id === activaId;
-                // La conversación abierta se está leyendo: no mostramos su contador.
-                const n = activa ? 0 : c.no_leidos;
-                return (
-                  <li key={c.id}>
-                    <Link
-                      href={`/chat/${c.id}`}
-                      aria-current={activa ? "page" : undefined}
-                      aria-label={n > 0 ? `${c.titulo}, ${n} sin leer` : c.titulo}
-                      data-tipo={c.tipo}
-                      className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors duration-150 ${
-                        activa ? "bg-primary-subtle text-fg" : "text-fg hover:bg-surface-raised"
-                      }`}
-                    >
-                      <span aria-hidden className="w-4 shrink-0 text-center text-fg-muted">
-                        <Icono c={c} />
-                      </span>
-                      <span className={`min-w-0 flex-1 truncate ${n > 0 ? "font-bold" : activa ? "font-medium" : ""}`}>
-                        {c.titulo}
-                      </span>
-                      {n > 0 && (
-                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[11px] font-bold text-white">
-                          {n > 99 ? "99+" : n}
+      {buscando ? (
+        <div aria-label="Búsqueda en los mensajes" role="region" className="min-h-0 flex-1 overflow-y-auto py-2">
+          <ChatBusqueda q={q} titulos={titulos} />
+        </div>
+      ) : (
+        <nav aria-label="Lista de conversaciones" className="min-h-0 flex-1 overflow-y-auto py-2">
+          {visibles.length === 0 && (
+            <p className="px-5 py-8 text-center text-sm text-fg-muted">{VACIO[filtro]}</p>
+          )}
+          {grupos.map((g) => (
+            <div key={g.id} className="mb-2">
+              {g.label && (
+                <h3 id={`chat-seccion-${g.id}`} className="px-5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
+                  {g.label}
+                </h3>
+              )}
+              <ul className="space-y-0.5 px-2" aria-labelledby={g.label ? `chat-seccion-${g.id}` : undefined}>
+                {g.items.map((c) => {
+                  const activa = c.id === activaId;
+                  // La conversación abierta se está leyendo: no mostramos su contador.
+                  const n = activa ? 0 : c.no_leidos;
+                  const otro = otroDe(c);
+                  const enLinea = !!otro && conectados.has(otro);
+                  return (
+                    <li key={c.id}>
+                      <Link
+                        href={`/chat/${c.id}`}
+                        aria-current={activa ? "page" : undefined}
+                        aria-label={n > 0 ? `${c.titulo}, ${n} sin leer` : c.titulo}
+                        data-tipo={c.tipo}
+                        className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors duration-150 ${
+                          activa ? "bg-primary-subtle text-fg" : "text-fg hover:bg-surface-raised"
+                        }`}
+                      >
+                        <span aria-hidden className="w-4 shrink-0 text-center text-fg-muted">
+                          <Icono c={c} />
                         </span>
-                      )}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
-      </nav>
+                        <span className={`min-w-0 flex-1 truncate ${n > 0 ? "font-bold" : activa ? "font-medium" : ""}`}>
+                          {c.titulo}
+                        </span>
+                        {enLinea && <PuntoConectado />}
+                        {n > 0 && (
+                          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[11px] font-bold text-white">
+                            {n > 99 ? "99+" : n}
+                          </span>
+                        )}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </nav>
+      )}
 
       {directorioAbierto && (
-        <ChatDirectorio directorio={directorio} yoId={yoId} onCerrar={cerrarDirectorio} />
+        <ChatDirectorio
+          directorio={directorio}
+          yoId={yoId}
+          onCerrar={cerrarDirectorio}
+          conectados={conectados}
+        />
       )}
     </aside>
   );

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { abrirDirecto } from "@/app/(panel)/chat/actions";
 import { filtraDirectorio } from "@/lib/chat/core";
 import { ROL_LABEL, type CompaneroDirectorio } from "@/lib/types";
+import { PuntoConectado } from "./PuntoConectado";
 
 /**
  * UC-601: directorio de compañeros activos (todos, también para asesores) con buscador
@@ -13,10 +14,13 @@ export function ChatDirectorio({
   directorio,
   yoId,
   onCerrar,
+  conectados,
 }: {
   directorio: CompaneroDirectorio[];
   yoId: string;
   onCerrar: () => void;
+  /** Ids de los compañeros con la plataforma abierta (UC-613). */
+  conectados?: ReadonlySet<string>;
 }) {
   const [q, setQ] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -99,7 +103,10 @@ export function ChatDirectorio({
           {companeros.map((c) => (
             <li key={c.id} className="flex items-center gap-3 px-5 py-2.5">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-fg">{c.nombre}</p>
+                <p className="flex items-center gap-1.5 text-sm font-medium text-fg">
+                  <span className="truncate">{c.nombre}</span>
+                  {conectados?.has(c.id) && <PuntoConectado />}
+                </p>
                 <p className="truncate text-xs text-fg-muted">
                   {[c.oficina ?? "Sin oficina", ROL_LABEL[c.rol] ?? c.rol].join(" · ")}
                 </p>

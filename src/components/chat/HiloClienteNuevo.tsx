@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { abrirHiloCliente, buscarHiloCliente, enviarMensaje } from "@/app/(panel)/chat/actions";
 import { useAvisoMensajes } from "@/lib/chat/realtime";
 import { mezclaMensajes } from "@/lib/chat/core";
-import type { Mensaje } from "@/lib/types";
+import type { Mensaje, Rol } from "@/lib/types";
 import { ChatComposer } from "./ChatComposer";
 import { ChatConversacion } from "./ChatConversacion";
 import type { Miembro } from "./MencionPicker";
@@ -26,6 +26,7 @@ export function HiloClienteNuevo({
   yo,
   nombresIniciales,
   miembros,
+  rol = null,
 }: {
   clienteId: string;
   titulo: string;
@@ -34,6 +35,8 @@ export function HiloClienteNuevo({
   nombresIniciales: Record<string, string>;
   /** Quienes verán el hilo (staff + la sede del cliente), para el selector de @. */
   miembros: Miembro[];
+  /** Rol del usuario, para moderar (UC-612). */
+  rol?: Rol | null;
 }) {
   const [abierta, setAbierta] = useState<{ id: string; mensajes: Mensaje[] } | null>(null);
   /** Mensajes escritos antes de que exista la conversación, en orden. */
@@ -109,6 +112,7 @@ export function HiloClienteNuevo({
         yo={yo}
         nombresIniciales={nombresIniciales}
         enlaceCabecera={{ href: `/chat/${abierta.id}`, label: "Abrir en el chat" }}
+        rol={rol}
       />
     );
   }

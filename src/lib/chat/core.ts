@@ -142,13 +142,20 @@ export function etiquetaDia(dia: string, ahora: Date = new Date()): string {
  * deduplica por id (la versión entrante sustituye a la existente) y ordena
  * ascendentemente por created_at y, a igualdad, por id.
  */
-export function mezclaMensajes<T extends { id: string; created_at: string }>(
-  actuales: T[],
-  nuevos: T[],
-): T[] {
+export function mezclaMensajes<
+  T extends { id: string; created_at: string; autor_nombre?: string | null },
+>(actuales: T[], nuevos: T[]): T[] {
   const porId = new Map<string, T>();
   for (const m of actuales) porId.set(m.id, m);
-  for (const m of nuevos) porId.set(m.id, m);
+  for (const m of nuevos) {
+    const previo = porId.get(m.id);
+    // Los eventos de Realtime (UPDATE al editar o borrar) no traen el nombre del autor:
+    // se conserva el que ya se conocía.
+    porId.set(
+      m.id,
+      previo?.autor_nombre && !m.autor_nombre ? { ...m, autor_nombre: previo.autor_nombre } : m,
+    );
+  }
   return [...porId.values()].sort((a, b) => {
     const ta = Date.parse(a.created_at);
     const tb = Date.parse(b.created_at);
@@ -159,13 +166,15 @@ export function mezclaMensajes<T extends { id: string; created_at: string }>(
 
 /**
  * Valida el texto de un mensaje antes de enviarlo. Recorta espacios en los extremos
- * (conserva los saltos de línea internos); rechaza vacíos y los que superan 5000 caracteres.
+ * (conserva los saltos de línea internos); rechaza vacíos (salvo `vacioPermitido`, p. ej. un
+ * mensaje que solo lleva un adjunto) y los que superan 5000 caracteres.
  */
 export function validaTextoMensaje(
   texto: string,
+  vacioPermitido = false,
 ): { ok: true; texto: string } | { ok: false; error: string } {
   const limpio = texto.trim();
-  if (!limpio) return { ok: false, error: "El mensaje está vacío." };
+  if (!limpio && !vacioPermitido) return { ok: false, error: "El mensaje está vacío." };
   if (limpio.length > MAX_LONGITUD_MENSAJE) {
     return { ok: false, error: `El mensaje supera los ${MAX_LONGITUD_MENSAJE} caracteres.` };
   }
@@ -443,4 +452,316 @@ export function trocearTexto(
   }
   if (pos < texto.length) res.push({ tipo: "texto", texto: texto.slice(pos) });
   return res;
+}
+
+// ============================================================================
+// Fase 3 — adjuntos (UC-610), búsqueda (UC-611), editar/borrar (UC-612),
+// "escribiendo…" (UC-613)
+// ============================================================================
+
+/** Tamaño máximo de un adjunto del chat. */
+export const MAX_MB_ADJUNTO = 20;
+export const MAX_BYTES_ADJUNTO = MAX_MB_ADJUNTO * 1024 * 1024;
+
+/** Tipos admitidos, por extensión (manda la extensión, como en la subida de facturas). */
+const MIME_ADJUNTO_POR_EXT: Record<string, string> = {
+  pdf: "application/pdf",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  gif: "image/gif",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+};
+
+const MIMES_ADJUNTO = new Set(Object.values(MIME_ADJUNTO_POR_EXT));
+
+/** Valor del atributo `accept` del selector de ficheros. */
+export const ACCEPT_ADJUNTO = Object.keys(MIME_ADJUNTO_POR_EXT)
+  .map((e) => `.${e}`)
+  .join(",");
+
+export const ERROR_TIPO_ADJUNTO = "Tipo de archivo no permitido: solo PDF, imágenes, Excel o Word.";
+export const ERROR_TAMANO_ADJUNTO = `El archivo supera el límite de ${MAX_MB_ADJUNTO} MB.`;
+/** Texto del error cuando falla la subida del fichero a Storage (no se envía nada). */
+export const ERROR_SUBIDA_ADJUNTO = "No se pudo subir el archivo. Inténtalo de nuevo.";
+
+/**
+ * Tipo MIME admitido de un adjunto, o null. Manda la extensión (el navegador no siempre
+ * informa el tipo): una extensión que no está en la lista se rechaza aunque el navegador diga
+ * otra cosa; solo un nombre SIN extensión se acepta por el tipo del navegador.
+ */
+export function mimeAdjunto(nombre: string, tipo?: string | null): string | null {
+  const partes = nombre.toLowerCase().split(".");
+  if (partes.length > 1) return MIME_ADJUNTO_POR_EXT[partes.pop() ?? ""] ?? null;
+  return tipo && MIMES_ADJUNTO.has(tipo) ? tipo : null;
+}
+
+/**
+ * UC-610 AC-30: valida un fichero antes de subirlo (en el navegador y otra vez en el
+ * servidor). Devuelve el tipo MIME que se guardará o el motivo del rechazo con el límite.
+ */
+export function validaAdjunto(
+  nombre: string,
+  mime: string | null | undefined,
+  size: number,
+): { ok: true; mime: string } | { ok: false; error: string } {
+  const tipo = mimeAdjunto(nombre ?? "", mime);
+  if (!tipo) return { ok: false, error: ERROR_TIPO_ADJUNTO };
+  if (!Number.isFinite(size) || size <= 0) return { ok: false, error: "El archivo está vacío." };
+  if (size > MAX_BYTES_ADJUNTO) return { ok: false, error: ERROR_TAMANO_ADJUNTO };
+  return { ok: true, mime: tipo };
+}
+
+/**
+ * Nombre a mostrar de un adjunto: sin carpetas ni caracteres de control, recortado a 255
+ * caracteres conservando la extensión.
+ */
+export function limpiaNombreAdjunto(nombre: string): string {
+  const base = (nombre ?? "").split(/[\\/]/).pop() ?? "";
+  const limpio = base.replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  if (limpio.length <= 255) return limpio;
+  const punto = limpio.lastIndexOf(".");
+  const ext = punto > 0 && limpio.length - punto <= 10 ? limpio.slice(punto) : "";
+  return limpio.slice(0, 255 - ext.length) + ext;
+}
+
+/**
+ * Nombre seguro para la clave del objeto en Storage: solo ASCII (letras, dígitos, "._-"),
+ * sin tildes, como mucho 100 caracteres conservando la extensión.
+ */
+export function saneaNombreAdjunto(nombre: string): string {
+  const limpio = limpiaNombreAdjunto(nombre)
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[^A-Za-z0-9._-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^[._-]+/, "");
+  if (!limpio) return "archivo";
+  if (limpio.length <= 100) return limpio;
+  const punto = limpio.lastIndexOf(".");
+  const ext = punto > 0 && limpio.length - punto <= 10 ? limpio.slice(punto) : "";
+  return limpio.slice(0, 100 - ext.length) + ext;
+}
+
+export interface AdjuntoMensaje {
+  path: string;
+  nombre: string;
+  mime: string;
+  size: number;
+}
+
+const UUID_ADJ = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+
+/**
+ * Valida en el servidor el adjunto que acompaña a un mensaje: la ruta tiene que ser
+ * `<conversación>/<uuid>/<nombre saneado>` de ESTA conversación, y nombre, tipo y tamaño
+ * tienen que ser admisibles. Devuelve el adjunto limpio o el motivo del rechazo.
+ */
+export function validaAdjuntoMensaje(
+  adjunto: Partial<AdjuntoMensaje> | null | undefined,
+  conversacionId: string,
+): { ok: true; adjunto: AdjuntoMensaje } | { ok: false; error: string } {
+  if (!adjunto || typeof adjunto !== "object") return { ok: false, error: "Adjunto no válido." };
+  const { path, nombre, mime, size } = adjunto;
+  if (typeof path !== "string" || typeof nombre !== "string" || typeof size !== "number") {
+    return { ok: false, error: "Adjunto no válido." };
+  }
+  const conv = conversacionId.toLowerCase();
+  const re = new RegExp(`^${conv}/${UUID_ADJ}/[A-Za-z0-9._-]{1,100}$`);
+  if (!path.startsWith(`${conv}/`) || !re.test(path) || path.includes("..")) {
+    return { ok: false, error: "Adjunto no válido." };
+  }
+  const limpio = limpiaNombreAdjunto(nombre);
+  if (!limpio) return { ok: false, error: "Adjunto no válido." };
+  if (!Number.isInteger(size)) return { ok: false, error: "Adjunto no válido." };
+  const v = validaAdjunto(limpio, typeof mime === "string" ? mime : null, size);
+  if (!v.ok) return v;
+  return { ok: true, adjunto: { path, nombre: limpio, mime: v.mime, size } };
+}
+
+export type TipoAdjunto = "pdf" | "imagen" | "excel" | "word" | "otro";
+
+/** Familia de un adjunto por su tipo MIME (para el icono y la etiqueta). */
+export function tipoAdjunto(mime: string | null | undefined): TipoAdjunto {
+  if (!mime) return "otro";
+  if (mime === "application/pdf") return "pdf";
+  if (mime.startsWith("image/")) return "imagen";
+  if (mime.includes("excel") || mime.includes("spreadsheetml")) return "excel";
+  if (mime.includes("msword") || mime.includes("wordprocessingml")) return "word";
+  return "otro";
+}
+
+const ETIQUETA_TIPO: Record<TipoAdjunto, string> = {
+  pdf: "PDF",
+  imagen: "Imagen",
+  excel: "Excel",
+  word: "Word",
+  otro: "Archivo",
+};
+
+/** Etiqueta del tipo de adjunto: "PDF", "Imagen", "Excel" o "Word". */
+export function etiquetaTipoAdjunto(mime: string | null | undefined): string {
+  return ETIQUETA_TIPO[tipoAdjunto(mime)];
+}
+
+/** Tamaño legible con coma decimal: "512 B", "340 KB", "1,2 MB", "20 MB". */
+export function formatoTamano(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  const mb = (bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, "").replace(".", ",");
+  return `${mb} MB`;
+}
+
+// ---- Búsqueda (UC-611) ----
+
+/** Caracteres mínimos para lanzar una búsqueda y espera (ms) tras la última tecla. */
+export const BUSQUEDA_MIN_CARACTERES = 2;
+export const BUSQUEDA_ESPERA_MS = 300;
+/** Resultados como mucho por búsqueda. */
+export const BUSQUEDA_LIMITE = 50;
+
+/** Palabras de la búsqueda (normalizadas, sin repetir, de 2 o más caracteres). */
+export function terminosBusqueda(q: string): string[] {
+  const vistos = new Set<string>();
+  for (const t of normalizaBusqueda(q).split(" ")) {
+    const limpio = t.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+    if (limpio.length >= 2) vistos.add(limpio);
+  }
+  return [...vistos].sort((a, b) => b.length - a.length);
+}
+
+/**
+ * Versión normalizada (minúsculas, sin tildes) del texto con, para cada carácter
+ * normalizado, la posición [inicio, fin) del carácter original del que sale.
+ */
+function mapaNormalizado(texto: string): { norm: string; ini: number[]; fin: number[] } {
+  let norm = "";
+  const ini: number[] = [];
+  const fin: number[] = [];
+  for (let i = 0; i < texto.length; ) {
+    const cp = texto.codePointAt(i) ?? 0;
+    const ch = String.fromCodePoint(cp);
+    const n = ch.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+    for (let k = 0; k < n.length; k++) {
+      norm += n[k];
+      ini.push(i);
+      fin.push(i + ch.length);
+    }
+    i += ch.length;
+  }
+  return { norm, ini, fin };
+}
+
+/** Tramos [inicio, fin) del texto original donde aparece alguna palabra de la búsqueda. */
+function tramosCoincidencia(texto: string, q: string): [number, number][] {
+  const terminos = terminosBusqueda(q);
+  if (terminos.length === 0 || !texto) return [];
+  const { norm, ini, fin } = mapaNormalizado(texto);
+  const tramos: [number, number][] = [];
+  for (const t of terminos) {
+    // La búsqueda de la BBDD usa raíces en español: "facturas" también encuentra "factura".
+    const candidatos = [t];
+    if (t.length > 3 && t.endsWith("es")) candidatos.push(t.slice(0, -2));
+    if (t.length > 3 && t.endsWith("s")) candidatos.push(t.slice(0, -1));
+    for (const c of candidatos) {
+      let encontrado = false;
+      for (let i = norm.indexOf(c); i >= 0; i = norm.indexOf(c, i + 1)) {
+        tramos.push([ini[i], fin[i + c.length - 1]]);
+        encontrado = true;
+      }
+      if (encontrado) break;
+    }
+  }
+  tramos.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+  const unidos: [number, number][] = [];
+  for (const t of tramos) {
+    const ultimo = unidos[unidos.length - 1];
+    if (ultimo && t[0] <= ultimo[1]) ultimo[1] = Math.max(ultimo[1], t[1]);
+    else unidos.push([t[0], t[1]]);
+  }
+  return unidos;
+}
+
+/**
+ * UC-611: trocea el texto marcando las palabras buscadas, sin distinguir mayúsculas ni
+ * tildes ("jose" marca "José"). Concatenar los trozos devuelve el texto original.
+ */
+export function resaltaCoincidencias(texto: string, q: string): { texto: string; marca: boolean }[] {
+  const tramos = tramosCoincidencia(texto, q);
+  const res: { texto: string; marca: boolean }[] = [];
+  let pos = 0;
+  for (const [i, f] of tramos) {
+    if (i > pos) res.push({ texto: texto.slice(pos, i), marca: false });
+    res.push({ texto: texto.slice(i, f), marca: true });
+    pos = f;
+  }
+  if (pos < texto.length || res.length === 0) res.push({ texto: texto.slice(pos), marca: false });
+  return res;
+}
+
+/**
+ * Extracto de un mensaje para la lista de resultados: en una línea y, si es largo, centrado
+ * en la primera coincidencia (con "…" donde se corta), como mucho `max` caracteres.
+ */
+export function extractoBusqueda(texto: string, q: string, max = 140): string {
+  const plano = texto.replace(/\s+/g, " ").trim();
+  if (plano.length <= max) return plano;
+  const primera = tramosCoincidencia(plano, q)[0]?.[0] ?? 0;
+  let inicio = Math.max(0, Math.min(primera - Math.floor(max / 4), plano.length - max));
+  if (inicio > 0) {
+    const espacio = plano.indexOf(" ", inicio);
+    if (espacio >= 0 && espacio < primera) inicio = espacio + 1;
+  }
+  let fin = Math.min(plano.length, inicio + max);
+  if (fin < plano.length) {
+    const espacio = plano.lastIndexOf(" ", fin);
+    if (espacio > primera) fin = espacio;
+  }
+  return `${inicio > 0 ? "…" : ""}${plano.slice(inicio, fin)}${fin < plano.length ? "…" : ""}`;
+}
+
+// ---- Editar y borrar (UC-612) ----
+
+/** Responsable o administrador: puede moderar (borrar mensajes ajenos). */
+export function esStaffChat(rol: string | null | undefined): boolean {
+  return rol === "responsable" || rol === "admin";
+}
+
+/** Solo el autor edita, y nunca un mensaje borrado. */
+export function puedeEditarMensaje(
+  m: { autor_id: string | null; borrado: boolean },
+  yoId: string | null | undefined,
+): boolean {
+  return !m.borrado && !!yoId && m.autor_id === yoId;
+}
+
+/** Borra el autor o, para moderar, un responsable o administrador. */
+export function puedeBorrarMensaje(
+  m: { autor_id: string | null; borrado: boolean },
+  yoId: string | null | undefined,
+  rol: string | null | undefined,
+): boolean {
+  if (m.borrado || !yoId) return false;
+  return m.autor_id === yoId || esStaffChat(rol);
+}
+
+// ---- "Escribiendo…" (UC-613) ----
+
+/** Como mucho un aviso de "escribiendo" cada 2 s, y caduca a los 5 s del último. */
+export const ESCRIBIENDO_CADA_MS = 2000;
+export const ESCRIBIENDO_CADUCA_MS = 5000;
+
+/** "Ana está escribiendo…", "Ana y Bruno están escribiendo…", "Varias personas…". */
+export function textoEscribiendo(nombres: string[]): string {
+  const n = [...new Set(nombres.map((x) => x.trim()).filter(Boolean))];
+  if (n.length === 0) return "";
+  if (n.length === 1) return `${n[0]} está escribiendo…`;
+  if (n.length === 2) return `${n[0]} y ${n[1]} están escribiendo…`;
+  if (n.length === 3) return `${n[0]}, ${n[1]} y ${n[2]} están escribiendo…`;
+  return "Varias personas están escribiendo…";
 }
