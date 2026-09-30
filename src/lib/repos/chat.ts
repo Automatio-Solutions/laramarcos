@@ -1,4 +1,5 @@
 import "server-only";
+import { unstable_rethrow } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type {
   CompaneroDirectorio,
@@ -157,10 +158,65 @@ export async function getDirectorio(): Promise<CompaneroDirectorio[]> {
   return (data ?? []) as CompaneroDirectorio[];
 }
 
-/** Total de mensajes sin leer (badge del menú). */
-export async function totalNoLeidos(): Promise<number> {
+/**
+ * Mensajes posteriores a `despuesDe` (ISO), en orden cronológico y con el nombre
+ * del autor. Sirve para rellenar el hueco tras una reconexión de Realtime.
+ */
+export async function listMensajesPosteriores(
+  convId: string,
+  despuesDe: string,
+  limite = 200,
+): Promise<Mensaje[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("chat_no_leidos");
-  if (error) return 0;
-  return ((data ?? []) as { no_leidos: number }[]).reduce((s, r) => s + r.no_leidos, 0);
+  const { data, error } = await supabase
+    .from("mensajes")
+    .select(SELECT_MENSAJE)
+    .eq("conversacion_id", convId)
+    .gt("created_at", despuesDe)
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true })
+    .limit(limite);
+  if (error) throw error;
+  const mensajes = (data ?? []) as Mensaje[];
+  const nombres = await resolverNombres(
+    supabase,
+    mensajes.map((m) => m.autor_id).filter((id): id is string => !!id),
+  );
+  return mensajes.map((m) => ({
+    ...m,
+    autor_nombre: m.autor_id ? (nombres.get(m.autor_id) ?? null) : null,
+  }));
+}
+
+/** Nombres de usuarios por id (incluye bajas), para mensajes llegados por Realtime. */
+export async function nombresPorId(ids: string[]): Promise<Record<string, string>> {
+  const supabase = await createClient();
+  return Object.fromEntries(await resolverNombres(supabase, ids));
+}
+
+/** No leídos por conversación del usuario autenticado (solo las que tienen alguno). */
+export async function noLeidosPorConversacion(): Promise<
+  { conversacion_id: string; no_leidos: number }[]
+> {
+  const supabase = await createClient();
+  return [...(await mapaNoLeidos(supabase))].map(([conversacion_id, no_leidos]) => ({
+    conversacion_id,
+    no_leidos,
+  }));
+}
+
+/**
+ * Total de mensajes sin leer (badge del menú). Lo llama el layout del panel en
+ * TODAS las páginas: nunca lanza (si el chat no está disponible, devuelve 0).
+ */
+export async function totalNoLeidos(): Promise<number> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase.rpc("chat_no_leidos");
+    if (error) return 0;
+    return ((data ?? []) as { no_leidos: number }[]).reduce((s, r) => s + r.no_leidos, 0);
+  } catch (e) {
+    unstable_rethrow(e);
+    return 0;
+  }
 }
