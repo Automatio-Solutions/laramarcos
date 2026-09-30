@@ -73,7 +73,7 @@ export default async function VigilanciaPage() {
           </ul>
         </div>
       </section>
-      <p className="text-xs text-fg-muted">Las circulares salen por Resend desde circulares@laramarcosasesores.es, con los clientes en copia oculta. Las tareas urgentes se crean en Tareas (origen DOE/BOE).</p>
+      <p className="text-xs text-fg-muted">Las circulares salen por Resend desde circulares@laramarcosasesores.es, con los clientes en copia oculta. La creación automática de tareas urgentes está desactivada.</p>
     </div>
   );
 }
