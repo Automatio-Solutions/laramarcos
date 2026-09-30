@@ -1,9 +1,10 @@
-// Test del chat interno (US-06 · UC-601..UC-609) — migraciones 0020 y 0021.
+// Test del chat interno (US-06 · UC-601..UC-609) — migraciones 0020, 0021 y 0022.
 // Verifica visibilidad por tipo de conversación (general / oficina / directo /
 // cliente), directorio de compañeros, apertura idempotente de directos, RLS de
 // escritura de mensajes, contador de no leídos y trigger de actividad.
 // Fase 2 (0021): miembros de una conversación, apertura del hilo de cliente,
 // cambio de oficina y visibilidad de comentarios de tareas.
+// 0022: escritura de comentarios solo si se ve la tarea y tarea_quienes_ven.
 //
 // Todo ocurre en UNA transacción que SIEMPRE se revierte. Las migraciones del
 // chat que aún no figuren en public._migrations se ejecutan dentro de esa misma
@@ -20,7 +21,7 @@ import { dirname, join } from 'node:path';
 import pg from 'pg';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const MIGRACIONES = ['0020_chat.sql', '0021_chat_fase2.sql'];
+const MIGRACIONES = ['0020_chat.sql', '0021_chat_fase2.sql', '0022_comentarios_insert.sql'];
 const rutaMigracion = (f) => join(__dirname, '..', 'supabase', 'migrations', f);
 
 const url = process.env.SUPABASE_DB_URL;
@@ -358,6 +359,78 @@ try {
   await asUser(asesorCas);
   const casCli = await q('select public.fn_puede_ver_tarea($1) as v', [tareaCliCas]);
   check('Comentarios · asesor_id de un cliente de OTRA sede no da acceso (igual que la RLS)', casCli.rows[0].v === false);
+  await asSuperuser();
+
+  // --- 0022 · Escritura de comentarios: solo quien ve la tarea ---
+  const insCom = (tareaId, subId, autor) => codigoError(
+    'insert into public.comentarios (tarea_id, subtarea_id, autor_id, texto) values ($1, $2, $3, $4)',
+    [tareaId, subId, autor, 'comentario de prueba']);
+  await asUser(asesorCas);
+  check('Comentarios · un asesor ajeno NO puede comentar en una tarea que no ve (42501)',
+    (await insCom(tarea, null, asesorCas)) === '42501');
+  check('Comentarios · un asesor ajeno NO puede comentar en una subtarea de una tarea que no ve (42501)',
+    (await insCom(null, sub, asesorCas)) === '42501');
+  check('Comentarios · asesor_id de un cliente de OTRA sede NO puede comentar en su tarea',
+    (await insCom(tareaCliCas, null, asesorCas)) === '42501');
+  await asSuperuser();
+  await asUser(asesorBdj);
+  check('Comentarios · el asignado de una subtarea SÍ puede comentar en la tarea',
+    (await insCom(tarea, null, asesorBdj)) === null);
+  check('Comentarios · el asignado SÍ puede comentar en su subtarea',
+    (await insCom(null, sub, asesorBdj)) === null);
+  check('Comentarios · asesor_id de un cliente de su sede SÍ puede comentar en su tarea',
+    (await insCom(tareaCliBdj, null, asesorBdj)) === null);
+  check('Comentarios · NO se puede comentar firmando como otro usuario',
+    (await insCom(tarea, null, resp)) === '42501');
+  await asSuperuser();
+  await asUser(asesorResp);
+  check('Comentarios · el responsable de la tarea (no staff) SÍ puede comentar',
+    (await insCom(tarea, null, asesorResp)) === null);
+  await asSuperuser();
+  await asUser(resp);
+  check('Comentarios · el staff SÍ puede comentar en cualquier tarea',
+    (await insCom(tareaCliCas, null, resp)) === null);
+  await asSuperuser();
+
+  // --- 0022 · tarea_quienes_ven = usuarios activos que pasan la RLS de tareas ---
+  const activos = ids(await q('select id from public.usuarios where activo'));
+  let quienesOk = true;
+  for (const t of [tarea, tareaCliBdj, tareaCliCas]) {
+    const esperados = [];
+    for (const u of activos) {
+      await asUser(u);
+      if ((await q('select 1 from public.tareas where id = $1', [t])).rowCount === 1) esperados.push(u);
+      await asSuperuser();
+    }
+    await asUser(resp);
+    const devueltos = ids(await q('select id from public.tarea_quienes_ven($1)', [t]));
+    await asSuperuser();
+    const a = [...esperados].sort(), b = [...devueltos].sort();
+    if (JSON.stringify(a) !== JSON.stringify(b)) {
+      quienesOk = false;
+      console.log(`    · discrepancia tarea=${t} rls=${a.length} fn=${b.length}`);
+    }
+  }
+  check(`tarea_quienes_ven · coincide con la RLS de tareas por usuario (${activos.length} activos × 3 tareas)`, quienesOk);
+  await asUser(asesorBdj);
+  const qvBdj = ids(await q('select id from public.tarea_quienes_ven($1)', [tarea]));
+  check('tarea_quienes_ven · incluye responsable, asignado y staff; excluye al ajeno y al inactivo',
+    [asesorResp, asesorBdj, resp].every((id) => qvBdj.includes(id)) &&
+    !qvBdj.includes(asesorCas) && !qvBdj.includes(inactivo));
+  await asSuperuser();
+  await asUser(asesorCas);
+  check('tarea_quienes_ven · quien no ve la tarea recibe 0 filas',
+    (await q('select id from public.tarea_quienes_ven($1)', [tarea])).rowCount === 0);
+  check('fn_usuario_ve_tarea · no se puede llamar desde la API (42501)',
+    (await codigoError('select public.fn_usuario_ve_tarea($1, $2)', [asesorBdj, tarea])) === '42501');
+  await asSuperuser();
+  await asUser(inactivo);
+  check('tarea_quienes_ven · un usuario inactivo recibe 0 filas',
+    (await q('select id from public.tarea_quienes_ven($1)', [tarea])).rowCount === 0);
+  await asSuperuser();
+  await asUser(resp);
+  check('tarea_quienes_ven · tarea inexistente → 0 filas',
+    (await q('select id from public.tarea_quienes_ven($1)', [randomUUID()])).rowCount === 0);
   await asSuperuser();
 
   const pubCom = await q(`select 1 from pg_publication_tables

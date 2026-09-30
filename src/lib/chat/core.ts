@@ -208,6 +208,22 @@ export function buscaMencionActiva(
 }
 
 /**
+ * ¿La consulta de la mención en curso corresponde a una mención ya elegida? Es así cuando
+ * es exactamente "Nombre" de una elegida o empieza por "Nombre" seguido de un espacio
+ * (lo que deja insertaMencion). En ese caso el selector no debe reabrirse sobre ella: solo
+ * se vuelve a abrir cuando se escribe una "@" nueva.
+ */
+export function mencionCompletada(consulta: string, elegidas: { nombre: string }[]): boolean {
+  const c = consulta.toLocaleLowerCase("es");
+  return elegidas.some((m) => {
+    const n = m.nombre.trim().toLocaleLowerCase("es");
+    if (!n || !c.startsWith(n)) return false;
+    const siguiente = c.slice(n.length, n.length + 1);
+    return siguiente === "" || /\s/.test(siguiente);
+  });
+}
+
+/**
  * Sustituye la mención en curso (de `inicio` a `cursor`) por "@Nombre " y devuelve el texto
  * nuevo y la posición del cursor tras el espacio.
  */
@@ -265,6 +281,42 @@ export function mencionesVigentes(
   for (const c of candidatos) {
     if (!c.id || c.id === autorId || vistos.has(c.id)) continue;
     if (posicionesMencion(texto, c.nombre).length === 0) continue;
+    vistos.add(c.id);
+    res.push(c.id);
+  }
+  return res;
+}
+
+/**
+ * ¿El token de una @mención de comentario ("ana" de "@ana") coincide con el INICIO de
+ * alguna palabra del nombre? Sin distinguir mayúsculas ni tildes: "ana" casa con
+ * "Ana María López" y "Luisa Ana", pero no con "Mariana" ni "Juana".
+ */
+export function coincideMencion(token: string, nombre: string): boolean {
+  const t = normalizaBusqueda(token);
+  if (!t) return false;
+  return normalizaBusqueda(nombre)
+    .split(/[^\p{L}\p{N}]+/u)
+    .some((palabra) => palabra.startsWith(t));
+}
+
+/**
+ * Ids mencionados en un comentario de tarea: cada "@token" (letras/dígitos tras "@") se
+ * resuelve contra los candidatos por inicio de palabra (coincideMencion). Excluye al autor
+ * y no repite ids; conserva el orden de los candidatos.
+ */
+export function resuelveMencionesComentario(
+  texto: string,
+  candidatos: { id: string; nombre: string }[],
+  autorId: string | null,
+): string[] {
+  const tokens = [...texto.normalize("NFC").matchAll(/@([\p{L}\p{N}]+)/gu)].map((m) => m[1]);
+  if (!tokens.length) return [];
+  const vistos = new Set<string>();
+  const res: string[] = [];
+  for (const c of candidatos) {
+    if (!c.id || c.id === autorId || vistos.has(c.id)) continue;
+    if (!tokens.some((tok) => coincideMencion(tok, c.nombre))) continue;
     vistos.add(c.id);
     res.push(c.id);
   }

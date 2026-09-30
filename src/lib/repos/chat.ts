@@ -154,6 +154,21 @@ export async function miembrosConversacion(
 }
 
 /**
+ * UC-606: id del hilo interno de un cliente SI YA EXISTE (solo lectura, con la RLS del
+ * usuario), o null. No crea nada: el hilo se crea al enviar el primer mensaje.
+ */
+export async function buscarConversacionCliente(clienteId: string): Promise<string | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("conversaciones")
+    .select("id")
+    .eq("cliente_id", clienteId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data?.id as string | undefined) ?? null;
+}
+
+/**
  * UC-606: crea (o devuelve) el hilo interno de un cliente. Lanza si el usuario no tiene
  * acceso al cliente (42501) o si la función no existe todavía.
  */

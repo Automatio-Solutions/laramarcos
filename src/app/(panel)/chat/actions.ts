@@ -3,6 +3,8 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import {
+  abrirConversacionCliente,
+  buscarConversacionCliente,
   getConversacion,
   listConversaciones,
   listMensajes,
@@ -214,6 +216,43 @@ export async function marcarLeida(conversacionId: string): Promise<void> {
     if (error) console.error("[chat] marcarLeida", error);
   } catch (e) {
     console.error("[chat] marcarLeida", e);
+  }
+}
+
+/**
+ * UC-606: crea (o recupera, si otro compañero se adelantó) el hilo interno de un cliente al
+ * enviar el primer mensaje desde su ficha. Devuelve su id y los últimos mensajes que ya
+ * tuviera. chat_abrir_cliente comprueba el acceso con las reglas de la ficha (AC-19).
+ */
+export async function abrirHiloCliente(
+  clienteId: string,
+): Promise<{ id: string; mensajes: Mensaje[] } | Error_> {
+  if (!UUID.test(clienteId)) return { error: "Conversación no disponible." };
+  try {
+    const id = await abrirConversacionCliente(clienteId);
+    const mensajes = await listMensajes(id, { limite: MENSAJES_POR_PAGINA });
+    return { id, mensajes };
+  } catch (e) {
+    return { error: mensajeError(e, "No se pudo abrir la conversación del cliente.") };
+  }
+}
+
+/**
+ * UC-606: hilo de un cliente SI YA EXISTE (solo lectura), con sus últimos mensajes; null si
+ * aún no hay hilo o no es visible. Lo usa la ficha en estado vacío para engancharse cuando
+ * otro compañero escribe el primer mensaje.
+ */
+export async function buscarHiloCliente(
+  clienteId: string,
+): Promise<{ id: string; mensajes: Mensaje[] } | null> {
+  if (!UUID.test(clienteId)) return null;
+  try {
+    const id = await buscarConversacionCliente(clienteId);
+    if (!id) return null;
+    return { id, mensajes: await listMensajes(id, { limite: MENSAJES_POR_PAGINA }) };
+  } catch (e) {
+    mensajeError(e, "");
+    return null;
   }
 }
 

@@ -4,6 +4,9 @@ import {
   MENSAJES_POR_PAGINA,
   agrupaPorDia,
   buscaMencionActiva,
+  coincideMencion,
+  mencionCompletada,
+  resuelveMencionesComentario,
   detectaEnlaces,
   insertaMencion,
   mencionesVigentes,
@@ -277,4 +280,46 @@ test("trocearTexto: texto, menciones y enlaces en orden, sin perder caracteres",
   assert.deepEqual(s, [{ tipo: "mencion", texto: "@Ana María", id: U1 }]);
   // una mención sin nombre en el texto no se resalta
   assert.deepEqual(trocearTexto("hola", [{ id: U1, nombre: "María" }]), [{ tipo: "texto", texto: "hola" }]);
+});
+
+test("coincideMencion: solo al inicio de una palabra, sin mayúsculas ni tildes", () => {
+  assert.equal(coincideMencion("ana", "Ana María López"), true);
+  assert.equal(coincideMencion("ana", "Luisa Ana"), true);
+  assert.equal(coincideMencion("ana", "Mariana"), false);
+  assert.equal(coincideMencion("ana", "Juana"), false);
+  assert.equal(coincideMencion("ANA", "ana maría"), true);
+  assert.equal(coincideMencion("maria", "Ana María López"), true);
+  assert.equal(coincideMencion("Jos", "José Ángel"), true);
+  assert.equal(coincideMencion("angel", "José Ángel"), true);
+  assert.equal(coincideMencion("lopez", "Ana María-López"), true);
+  assert.equal(coincideMencion("", "Ana"), false);
+});
+
+test("resuelveMencionesComentario: inicio de palabra, sin autor ni repetidos", () => {
+  const cands = [
+    { id: "a", nombre: "Ana María López" },
+    { id: "b", nombre: "Luisa Ana" },
+    { id: "c", nombre: "Mariana" },
+    { id: "d", nombre: "Juana" },
+    { id: "e", nombre: "José Ángel" },
+  ];
+  assert.deepEqual(resuelveMencionesComentario("hola @ana", cands, null), ["a", "b"]);
+  assert.deepEqual(resuelveMencionesComentario("hola @ana", cands, "a"), ["b"]);
+  assert.deepEqual(resuelveMencionesComentario("@Ángel y @ana @ana", cands, null), ["a", "b", "e"]);
+  assert.deepEqual(resuelveMencionesComentario("sin menciones", cands, null), []);
+  assert.deepEqual(resuelveMencionesComentario("@xyz", cands, null), []);
+});
+
+test("mencionCompletada: no reabre el selector sobre una mención ya elegida", () => {
+  const el = [{ nombre: "Bruno Pérez" }];
+  // tras elegir, insertaMencion deja "@Bruno Pérez " → consulta "Bruno Pérez "
+  const r = insertaMencion("gracias @bru", 8, 12, "Bruno Pérez");
+  const c = buscaMencionActiva(r.texto, r.cursor);
+  assert.equal(c?.consulta, "Bruno Pérez ");
+  assert.equal(mencionCompletada(c!.consulta, el), true);
+  assert.equal(mencionCompletada("Bruno Pérez", el), true);
+  assert.equal(mencionCompletada("bruno pérez y más", el), true);
+  assert.equal(mencionCompletada("Bruno", el), false);
+  assert.equal(mencionCompletada("Bruno Pérezz", el), false);
+  assert.equal(mencionCompletada("Bruno Pérez", []), false);
 });

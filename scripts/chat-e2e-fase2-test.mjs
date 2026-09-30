@@ -6,7 +6,7 @@
 // resto). El hilo del cliente temporal sí lo ve brevemente la gente de Badajoz y
 // los responsables, igual que el resto de datos QAE2E de scripts/e2e-test.mjs.
 //
-// Requiere la app levantada (E2E_BASE_URL) y las migraciones 0020 y 0021.
+// Requiere la app levantada (E2E_BASE_URL) y las migraciones 0020, 0021 y 0022.
 // Uso: npm run e2e:chat-fase2
 import { chromium } from "playwright";
 import { createClient } from "@supabase/supabase-js";

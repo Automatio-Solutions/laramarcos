@@ -6,6 +6,7 @@ import {
   buscaMencionActiva,
   filtraDirectorio,
   insertaMencion,
+  mencionCompletada,
   mencionesVigentes,
   validaTextoMensaje,
 } from "@/lib/chat/core";
@@ -24,7 +25,8 @@ type Consulta = { inicio: number; consulta: string; cursor: number };
  *
  * UC-605: al escribir "@" y parte de un nombre se abre el selector de compañeros de la
  * conversación (flechas para moverse, Enter o Tab para elegir, Esc para cerrar). Mientras
- * está abierto, Enter elige en lugar de enviar.
+ * está abierto, Enter elige en lugar de enviar. Una mención ya elegida no reabre el
+ * selector: solo se abre de nuevo al escribir otra "@".
  */
 export function ChatComposer({
   onEnviar,
@@ -67,9 +69,12 @@ export function ChatComposer({
 
   const opciones = useMemo(() => {
     if (!consulta || !miembros || consulta.inicio === cerradaEn) return [];
+    // Una mención ya elegida ("@Nombre ") no reabre el selector (p. ej. al recolocar el
+    // cursor tras insertarla): así Enter al final de "gracias @Bruno Pérez " envía.
+    if (mencionCompletada(consulta.consulta, elegidas)) return [];
     const otros = miembros.filter((m) => m.id !== yoId);
     return filtraDirectorio(otros, consulta.consulta).slice(0, MAX_OPCIONES);
-  }, [consulta, miembros, yoId, cerradaEn]);
+  }, [consulta, miembros, yoId, cerradaEn, elegidas]);
   const abierto = opciones.length > 0;
   const activo = Math.min(indice, Math.max(0, opciones.length - 1));
 
@@ -108,6 +113,7 @@ export function ChatComposer({
     setTexto("");
     setElegidas([]);
     setConsulta(null);
+    setCerradaEn(null);
     ref.current?.focus();
   }
 

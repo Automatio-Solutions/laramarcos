@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { EstadoTarea } from "@/lib/types";
+import { resuelveMencionesComentario } from "@/lib/chat/core";
 
 const ESTADOS: EstadoTarea[] = ["pendiente", "en_curso", "bloqueada", "completada"];
 const rev = (id: string) => revalidatePath(`/tareas/${id}`);
@@ -78,29 +79,32 @@ export async function addComentarioAction(tareaId: string, formData: FormData) {
   if (!texto) return;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
 
-  // Resolver @menciones a ids de usuario por nombre
-  const tokens = [...texto.matchAll(/@([\p{L}]+)/gu)].map((m) => m[1].toLowerCase());
+  // Resolver @menciones por inicio de palabra ("@ana" → "Ana María", no "Mariana") y
+  // solo entre quienes pueden ver la tarea (tarea_quienes_ven, 0022): así nadie recibe
+  // un aviso que lleve a una tarea que no puede abrir. Vacío si el autor no la ve.
   let menciones: string[] = [];
-  if (tokens.length) {
-    // Directorio de activos: la RLS de usuarios solo deja al asesor verse a sí mismo,
-    // así que leer la tabla dejaba sin resolver las menciones que hacía un asesor.
-    const { data: users } = await supabase.rpc("chat_directorio");
-    menciones = ((users ?? []) as { id: string; nombre: string }[])
-      .filter((u) => tokens.some((tok) => (u.nombre as string).toLowerCase().includes(tok)))
-      .map((u) => u.id as string);
+  if (texto.includes("@")) {
+    const { data: candidatos } = await supabase.rpc("tarea_quienes_ven", { p_tarea: tareaId });
+    menciones = resuelveMencionesComentario(
+      texto,
+      (candidatos ?? []) as { id: string; nombre: string }[],
+      user.id,
+    );
   }
 
-  await supabase.from("comentarios").insert({
+  // La RLS (comentarios_insert, 0022) exige firmar como uno mismo y poder ver la tarea.
+  const { error } = await supabase.from("comentarios").insert({
     tarea_id: tareaId,
-    autor_id: user?.id,
+    autor_id: user.id,
     texto,
     menciones,
   });
+  if (error) return; // sin comentario no hay avisos
 
-  // AC-12: notificar in-app a cada persona mencionada
+  // AC-12: notificar in-app a cada persona mencionada (el autor ya está excluido)
   for (const uid of menciones) {
-    if (uid === user?.id) continue;
     await supabase.rpc("crear_notificacion", {
       p_usuario: uid,
       p_tipo: "mencion",

@@ -40,6 +40,11 @@ const UMBRAL_TECHO = 80;
 const MAX_PAGINAS_OBJETIVO = 10;
 /** Tiempo (ms) que se mantiene resaltado el mensaje enlazado. */
 const DURACION_RESALTADO = 2500;
+/** Reintentos como mucho al resolver enlaces tras un error, y espera (ms) entre ellos. */
+const MAX_REINTENTOS_ENLACE = 2;
+const ESPERA_REINTENTO_ENLACE = 3000;
+/** Ids por tipo que resuelve el servidor en cada llamada (resolverEnlaces). */
+const MAX_ENLACES_POR_LOTE = 50;
 
 type Ajuste = { tipo: "fondo" } | { tipo: "restaurar"; alto: number; top: number } | null;
 
@@ -94,6 +99,11 @@ export function ChatConversacion({
   const [miembros, setMiembros] = useState<Miembro[] | null>(null);
   const [enlaces, setEnlaces] = useState<Record<string, Resuelto | null>>({});
   const pidiendoEnlaces = useRef(new Set<string>());
+  /** Errores seguidos al resolver cada enlace (no se cachean: se reintenta). */
+  const fallosEnlaces = useRef(new Map<string, number>());
+  const temporizadoresEnlace = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const montado = useRef(true);
+  const [reintentoEnlaces, setReintentoEnlaces] = useState(0);
   const [resaltadoId, setResaltadoId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -181,6 +191,9 @@ export function ChatConversacion({
   }, [conversacionId]);
 
   // ---- Enlaces a tareas y clientes (UC-608): se resuelven en lote y se guardan ----
+  // Solo se guarda lo que el servidor contesta: lo que NO devuelve (sin permiso o
+  // inexistente) queda "no disponible" (AC-24). Un error (red, servidor) no se guarda:
+  // la tarjeta sigue "Cargando…" y se reintenta a los pocos segundos (máx. 2 reintentos).
   useEffect(() => {
     const tareas: string[] = [];
     const clientes: string[] = [];
@@ -189,8 +202,13 @@ export function ChatConversacion({
       for (const e of detectaEnlaces(m.texto)) {
         const k = claveEnlace(e.tipo, e.id);
         if (k in enlaces || pidiendoEnlaces.current.has(k)) continue;
+        if ((fallosEnlaces.current.get(k) ?? 0) > MAX_REINTENTOS_ENLACE) continue;
+        const lote = e.tipo === "tarea" ? tareas : clientes;
+        // El servidor atiende 50 por tipo; el resto va en la siguiente pasada (no se
+        // debe marcar como "no disponible" algo que ni se preguntó).
+        if (lote.length >= MAX_ENLACES_POR_LOTE) continue;
         pidiendoEnlaces.current.add(k);
-        (e.tipo === "tarea" ? tareas : clientes).push(e.id);
+        lote.push(e.id);
       }
     }
     if (tareas.length === 0 && clientes.length === 0) return;
@@ -198,19 +216,43 @@ export function ChatConversacion({
       ...tareas.map((id) => claveEnlace("tarea", id)),
       ...clientes.map((id) => claveEnlace("cliente", id)),
     ];
-    // Lo que no vuelve (sin permiso, inexistente o error) queda como "no disponible" (AC-24).
-    const marcar = (r: { tareas: Record<string, Resuelto>; clientes: Record<string, Resuelto> } | null) =>
+    const guardar = (r: { tareas: Record<string, Resuelto>; clientes: Record<string, Resuelto> }) =>
       setEnlaces((prev) => {
         const sig = { ...prev };
-        for (const id of tareas) sig[claveEnlace("tarea", id)] = r?.tareas[id] ?? null;
-        for (const id of clientes) sig[claveEnlace("cliente", id)] = r?.clientes[id] ?? null;
+        for (const id of tareas) sig[claveEnlace("tarea", id)] = r.tareas[id] ?? null;
+        for (const id of clientes) sig[claveEnlace("cliente", id)] = r.clientes[id] ?? null;
         return sig;
       });
+    const fallo = () => {
+      let reintentar = false;
+      for (const k of claves) {
+        const n = (fallosEnlaces.current.get(k) ?? 0) + 1;
+        fallosEnlaces.current.set(k, n);
+        if (n <= MAX_REINTENTOS_ENLACE) reintentar = true;
+      }
+      if (reintentar && montado.current) {
+        const t = setTimeout(() => {
+          temporizadoresEnlace.current.delete(t);
+          if (montado.current) setReintentoEnlaces((x) => x + 1);
+        }, ESPERA_REINTENTO_ENLACE);
+        temporizadoresEnlace.current.add(t);
+      }
+    };
     resolverEnlaces({ tareas, clientes })
-      .then((r) => marcar("error" in r ? null : r))
-      .catch(() => marcar(null))
+      .then((r) => ("error" in r ? fallo() : guardar(r)))
+      .catch(fallo)
       .finally(() => claves.forEach((k) => pidiendoEnlaces.current.delete(k)));
-  }, [mensajes, enlaces]);
+  }, [mensajes, enlaces, reintentoEnlaces]);
+
+  useEffect(() => {
+    montado.current = true;
+    const temporizadores = temporizadoresEnlace.current;
+    return () => {
+      montado.current = false;
+      temporizadores.forEach(clearTimeout);
+      temporizadores.clear();
+    };
+  }, []);
 
   const resolverEnlace = useCallback(
     (tipo: TipoEnlace, id: string): EstadoEnlace => {
