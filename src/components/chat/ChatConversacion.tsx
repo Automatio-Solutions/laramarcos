@@ -1,8 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { cargarAnteriores, enviarMensaje, marcarLeida, resolverNombres } from "@/app/(panel)/chat/actions";
-import { MENSAJES_POR_PAGINA, agrupaPorDia, etiquetaDia, mezclaMensajes } from "@/lib/chat/core";
+import Link from "next/link";
+import {
+  cargarAnteriores,
+  enviarMensaje,
+  marcarLeida,
+  obtenerMiembros,
+  resolverEnlaces,
+  resolverNombres,
+} from "@/app/(panel)/chat/actions";
+import {
+  MENSAJES_POR_PAGINA,
+  agrupaPorDia,
+  detectaEnlaces,
+  etiquetaDia,
+  mezclaMensajes,
+  type TipoEnlace,
+} from "@/lib/chat/core";
 import {
   avisarNoLeidos,
   limpiarConversacionAbierta,
@@ -13,13 +28,24 @@ import {
 import type { Mensaje } from "@/lib/types";
 import { ChatComposer } from "./ChatComposer";
 import { ChatMensaje, type MensajeUI } from "./ChatMensaje";
+import type { EstadoEnlace } from "./EnlaceCard";
+import type { Miembro } from "./MencionPicker";
 
 /** Distancia (px) al fondo por debajo de la cual se considera que el usuario "está abajo". */
 const UMBRAL_FONDO = 120;
 /** Distancia (px) al techo a partir de la cual se cargan mensajes anteriores. */
 const UMBRAL_TECHO = 80;
 
+/** Páginas anteriores que se cargan como mucho para llegar a un mensaje enlazado (?m=). */
+const MAX_PAGINAS_OBJETIVO = 10;
+/** Tiempo (ms) que se mantiene resaltado el mensaje enlazado. */
+const DURACION_RESALTADO = 2500;
+
 type Ajuste = { tipo: "fondo" } | { tipo: "restaurar"; alto: number; top: number } | null;
+
+type Resuelto = { titulo: string; estado: string };
+
+const claveEnlace = (tipo: TipoEnlace, id: string) => `${tipo}:${id}`;
 
 /**
  * UC-602/UC-603: conversación abierta. Carga los 50 más recientes y, al subir, 50 más;
@@ -32,6 +58,9 @@ export function ChatConversacion({
   mensajesIniciales,
   yo,
   nombresIniciales,
+  mensajeObjetivo = null,
+  enlaceCabecera,
+  etiqueta,
 }: {
   conversacionId: string;
   titulo: string;
@@ -39,6 +68,12 @@ export function ChatConversacion({
   mensajesIniciales: Mensaje[];
   yo: { id: string; nombre: string };
   nombresIniciales: Record<string, string>;
+  /** Mensaje al que saltar y resaltar (enlace ?m= de una notificación). */
+  mensajeObjetivo?: string | null;
+  /** Enlace a la derecha de la cabecera (p. ej. "Ver ficha" en hilos de cliente). */
+  enlaceCabecera?: { href: string; label: string };
+  /** Nombre accesible de la sección (por defecto "Conversación: <título>"). */
+  etiqueta?: string;
 }) {
   const [mensajes, setMensajes] = useState<MensajeUI[]>(mensajesIniciales);
   const [hayMas, setHayMas] = useState(mensajesIniciales.length >= MENSAJES_POR_PAGINA);
@@ -56,6 +91,10 @@ export function ChatConversacion({
   const cargandoRef = useRef(false);
   const pidiendoNombres = useRef(new Set<string>());
   const temporizadorLeida = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [miembros, setMiembros] = useState<Miembro[] | null>(null);
+  const [enlaces, setEnlaces] = useState<Record<string, Resuelto | null>>({});
+  const pidiendoEnlaces = useRef(new Set<string>());
+  const [resaltadoId, setResaltadoId] = useState<string | null>(null);
 
   useEffect(() => {
     mensajesRef.current = mensajes;
@@ -115,7 +154,7 @@ export function ChatConversacion({
     const faltan = [
       ...new Set(
         mensajes
-          .map((m) => m.autor_id)
+          .flatMap((m) => [m.autor_id, ...(m.menciones ?? [])])
           .filter((id): id is string => !!id && !nombres[id] && !pidiendoNombres.current.has(id)),
       ),
     ];
@@ -125,6 +164,61 @@ export function ChatConversacion({
       .then((r) => setNombres((n) => ({ ...n, ...r })))
       .catch(() => faltan.forEach((id) => pidiendoNombres.current.delete(id)));
   }, [mensajes, nombres]);
+
+  // ---- Miembros para el selector de @menciones (UC-605), una vez por conversación ----
+  useEffect(() => {
+    let activo = true;
+    obtenerMiembros(conversacionId)
+      .then((r) => {
+        if (activo && "miembros" in r) setMiembros(r.miembros);
+      })
+      .catch(() => {
+        // Sin miembros no hay selector; se puede seguir escribiendo.
+      });
+    return () => {
+      activo = false;
+    };
+  }, [conversacionId]);
+
+  // ---- Enlaces a tareas y clientes (UC-608): se resuelven en lote y se guardan ----
+  useEffect(() => {
+    const tareas: string[] = [];
+    const clientes: string[] = [];
+    for (const m of mensajes) {
+      if (m.borrado) continue;
+      for (const e of detectaEnlaces(m.texto)) {
+        const k = claveEnlace(e.tipo, e.id);
+        if (k in enlaces || pidiendoEnlaces.current.has(k)) continue;
+        pidiendoEnlaces.current.add(k);
+        (e.tipo === "tarea" ? tareas : clientes).push(e.id);
+      }
+    }
+    if (tareas.length === 0 && clientes.length === 0) return;
+    const claves = [
+      ...tareas.map((id) => claveEnlace("tarea", id)),
+      ...clientes.map((id) => claveEnlace("cliente", id)),
+    ];
+    // Lo que no vuelve (sin permiso, inexistente o error) queda como "no disponible" (AC-24).
+    const marcar = (r: { tareas: Record<string, Resuelto>; clientes: Record<string, Resuelto> } | null) =>
+      setEnlaces((prev) => {
+        const sig = { ...prev };
+        for (const id of tareas) sig[claveEnlace("tarea", id)] = r?.tareas[id] ?? null;
+        for (const id of clientes) sig[claveEnlace("cliente", id)] = r?.clientes[id] ?? null;
+        return sig;
+      });
+    resolverEnlaces({ tareas, clientes })
+      .then((r) => marcar("error" in r ? null : r))
+      .catch(() => marcar(null))
+      .finally(() => claves.forEach((k) => pidiendoEnlaces.current.delete(k)));
+  }, [mensajes, enlaces]);
+
+  const resolverEnlace = useCallback(
+    (tipo: TipoEnlace, id: string): EstadoEnlace => {
+      const k = claveEnlace(tipo, id);
+      return k in enlaces ? enlaces[k] : undefined;
+    },
+    [enlaces],
+  );
 
   // ---- Tiempo real (UC-603 AC-01) ----
   const alCambio = useCallback(
@@ -150,30 +244,85 @@ export function ChatConversacion({
   useMensajesRealtime(conversacionId, alCambio, ultimaFecha);
 
   // ---- Paginación hacia atrás (UC-602 AC-03) ----
-  async function cargarMas() {
-    if (cargandoRef.current) return;
-    const primero = mensajesRef.current.find((m) => !m.estado);
-    if (!primero) return;
+  /** Carga la página anterior a `antesDe`. Devuelve lo cargado, o null si falla o ya hay otra en curso. */
+  async function cargarPagina(antesDe: string): Promise<Mensaje[] | null> {
+    if (cargandoRef.current) return null;
     cargandoRef.current = true;
     setCargando(true);
     setErrorAnteriores(null);
     try {
-      const r = await cargarAnteriores(conversacionId, primero.created_at);
+      const r = await cargarAnteriores(conversacionId, antesDe);
       if ("error" in r) {
         setErrorAnteriores(r.error);
-      } else {
-        const el = scrollRef.current;
-        if (el) ajuste.current = { tipo: "restaurar", alto: el.scrollHeight, top: el.scrollTop };
-        setMensajes((ms) => mezclaMensajes(r.mensajes, ms));
-        setHayMas(r.mensajes.length >= MENSAJES_POR_PAGINA);
+        return null;
       }
+      const el = scrollRef.current;
+      if (el) ajuste.current = { tipo: "restaurar", alto: el.scrollHeight, top: el.scrollTop };
+      setMensajes((ms) => mezclaMensajes(r.mensajes, ms));
+      setHayMas(r.mensajes.length >= MENSAJES_POR_PAGINA);
+      return r.mensajes;
     } catch {
       setErrorAnteriores("Sin conexión. No se pudieron cargar los mensajes anteriores.");
+      return null;
     } finally {
       cargandoRef.current = false;
       setCargando(false);
     }
   }
+
+  async function cargarMas() {
+    const primero = mensajesRef.current.find((m) => !m.estado);
+    if (primero) await cargarPagina(primero.created_at);
+  }
+
+  // ---- Salto a un mensaje enlazado (?m=, UC-605 AC-16) ----
+  // Si no está en lo cargado, pide páginas anteriores (máx. 10); si no aparece, no hace nada.
+  const cargarPaginaRef = useRef(cargarPagina);
+  useEffect(() => {
+    cargarPaginaRef.current = cargarPagina;
+  });
+
+  useEffect(() => {
+    if (!mensajeObjetivo) return;
+    const objetivo = mensajeObjetivo;
+    let cancelado = false;
+    let temporizador: ReturnType<typeof setTimeout> | null = null;
+
+    const resaltar = (intentos: number) => {
+      if (cancelado) return;
+      const el = document.getElementById(`mensaje-${objetivo}`);
+      if (!el) {
+        // Aún no pintado: se reintenta en el siguiente fotograma (máx. ~10).
+        if (intentos > 0) requestAnimationFrame(() => resaltar(intentos - 1));
+        return;
+      }
+      el.scrollIntoView({ block: "center" });
+      const cont = scrollRef.current;
+      if (cont) pegadoAbajo.current = cont.scrollHeight - cont.scrollTop - cont.clientHeight < UMBRAL_FONDO;
+      setResaltadoId(objetivo);
+      temporizador = setTimeout(() => setResaltadoId((r) => (r === objetivo ? null : r)), DURACION_RESALTADO);
+    };
+
+    (async () => {
+      let encontrado = mensajesRef.current.some((m) => m.id === objetivo);
+      let antesDe = mensajesRef.current.find((m) => !m.estado)?.created_at ?? null;
+      for (let i = 0; !encontrado && antesDe && i < MAX_PAGINAS_OBJETIVO && !cancelado; i++) {
+        const pagina = await cargarPaginaRef.current(antesDe);
+        if (!pagina || pagina.length === 0) break;
+        encontrado = pagina.some((m) => m.id === objetivo);
+        if (pagina.length < MENSAJES_POR_PAGINA) break;
+        antesDe = pagina[0].created_at;
+      }
+      if (encontrado && !cancelado) requestAnimationFrame(() => resaltar(10));
+    })().catch(() => {
+      // Sin red: se deja la conversación donde está.
+    });
+
+    return () => {
+      cancelado = true;
+      if (temporizador) clearTimeout(temporizador);
+    };
+  }, [mensajeObjetivo]);
 
   function alHacerScroll() {
     const el = scrollRef.current;
@@ -183,7 +332,7 @@ export function ChatConversacion({
   }
 
   // ---- Envío optimista con reintento (UC-603 AC-03) ----
-  async function enviarConId(id: string, texto: string) {
+  async function enviarConId(id: string, texto: string, menciones: string[] = []) {
     ajuste.current = { tipo: "fondo" };
     setMensajes((ms) => {
       const existente = ms.find((m) => m.id === id);
@@ -194,7 +343,7 @@ export function ChatConversacion({
         autor_id: yo.id,
         autor_nombre: yo.nombre,
         texto,
-        menciones: [],
+        menciones,
         editado_at: null,
         borrado: false,
         created_at: new Date().toISOString(),
@@ -205,7 +354,7 @@ export function ChatConversacion({
 
     let confirmado: Mensaje | null = null;
     try {
-      const r = await enviarMensaje({ id, conversacionId, texto });
+      const r = await enviarMensaje({ id, conversacionId, texto, menciones });
       if ("mensaje" in r) confirmado = r.mensaje;
     } catch {
       // Sin conexión: se marca como no enviado.
@@ -228,10 +377,23 @@ export function ChatConversacion({
   const grupos = agrupaPorDia(mensajes);
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface" aria-label={`Conversación: ${titulo}`}>
-      <header className="shrink-0 border-b border-border px-5 py-3">
-        <h1 className="truncate text-base font-semibold text-fg">{titulo}</h1>
-        {subtitulo && <p className="truncate text-xs text-fg-muted">{subtitulo}</p>}
+    <section
+      className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface"
+      aria-label={etiqueta ?? `Conversación: ${titulo}`}
+    >
+      <header className="flex shrink-0 items-center gap-3 border-b border-border px-5 py-3">
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-base font-semibold text-fg">{titulo}</h1>
+          {subtitulo && <p className="truncate text-xs text-fg-muted">{subtitulo}</p>}
+        </div>
+        {enlaceCabecera && (
+          <Link
+            href={enlaceCabecera.href}
+            className="shrink-0 rounded-md border border-border px-3 py-1 text-xs font-medium text-fg transition-colors duration-150 hover:bg-surface-raised"
+          >
+            {enlaceCabecera.label}
+          </Link>
+        )}
       </header>
 
       <div
@@ -284,7 +446,12 @@ export function ChatConversacion({
                       key={m.id}
                       mensaje={m}
                       autor={autorDe(m)}
-                      onReintentar={(x) => void enviarConId(x.id, x.texto)}
+                      onReintentar={(x) => void enviarConId(x.id, x.texto, x.menciones)}
+                      nombres={nombres}
+                      yoId={yo.id}
+                      enlaces={m.borrado ? [] : detectaEnlaces(m.texto)}
+                      resolverEnlace={resolverEnlace}
+                      resaltado={m.id === resaltadoId}
                     />
                   ))}
                 </ul>
@@ -296,7 +463,9 @@ export function ChatConversacion({
 
       <ChatComposer
         placeholder={`Escribe en ${titulo}…`}
-        onEnviar={(texto) => void enviarConId(crypto.randomUUID(), texto)}
+        miembros={miembros}
+        yoId={yo.id}
+        onEnviar={(texto, menciones) => void enviarConId(crypto.randomUUID(), texto, menciones)}
       />
     </section>
   );

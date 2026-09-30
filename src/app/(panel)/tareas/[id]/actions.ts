@@ -83,8 +83,10 @@ export async function addComentarioAction(tareaId: string, formData: FormData) {
   const tokens = [...texto.matchAll(/@([\p{L}]+)/gu)].map((m) => m[1].toLowerCase());
   let menciones: string[] = [];
   if (tokens.length) {
-    const { data: users } = await supabase.from("usuarios").select("id, nombre");
-    menciones = (users ?? [])
+    // Directorio de activos: la RLS de usuarios solo deja al asesor verse a sí mismo,
+    // así que leer la tabla dejaba sin resolver las menciones que hacía un asesor.
+    const { data: users } = await supabase.rpc("chat_directorio");
+    menciones = ((users ?? []) as { id: string; nombre: string }[])
       .filter((u) => tokens.some((tok) => (u.nombre as string).toLowerCase().includes(tok)))
       .map((u) => u.id as string);
   }

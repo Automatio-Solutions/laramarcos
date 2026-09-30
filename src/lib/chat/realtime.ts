@@ -271,3 +271,75 @@ export function useNoLeidos(inicial: number) {
         );
   return { porConversacion: porConversacion ?? {}, total };
 }
+
+/**
+ * Suscripción genérica a cambios de una tabla (postgres_changes) con el socket autenticado:
+ * la RLS de la tabla decide qué eventos llegan. Llama a `alCambiar` con debounce de
+ * `esperaMs`; también tras una reconexión y al volver la red o la pestaña, por si se
+ * perdieron eventos durante el corte. Se limpia al desmontar o al cambiar tabla/filtro.
+ */
+export function useCambiosTabla(
+  {
+    tabla,
+    filtro,
+    evento = "*",
+    esperaMs = 200,
+  }: {
+    tabla: string;
+    filtro?: string;
+    evento?: "INSERT" | "UPDATE" | "DELETE" | "*";
+    esperaMs?: number;
+  },
+  alCambiar: () => void,
+) {
+  const alCambiarRef = useRef(alCambiar);
+  useEffect(() => {
+    alCambiarRef.current = alCambiar;
+  });
+
+  useEffect(() => {
+    let activo = true;
+    let temporizador: ReturnType<typeof setTimeout> | null = null;
+    let quitar: (() => void) | null = null;
+
+    const programar = () => {
+      if (temporizador) clearTimeout(temporizador);
+      temporizador = setTimeout(() => {
+        if (activo) alCambiarRef.current();
+      }, esperaMs);
+    };
+
+    clienteRealtime()
+      .then((supabase) => {
+        if (!activo) return;
+        let primeraSuscripcion = true;
+        const canal = supabase
+          .channel(nombreCanal(`${tabla}:${filtro ?? "todo"}`))
+          .on(
+            "postgres_changes",
+            { event: evento, schema: "public", table: tabla, ...(filtro ? { filter: filtro } : {}) },
+            programar,
+          )
+          .subscribe((estado) => {
+            if (estado !== "SUBSCRIBED") return;
+            if (primeraSuscripcion) primeraSuscripcion = false;
+            else programar();
+          });
+        quitar = () => void supabase.removeChannel(canal);
+      })
+      .catch((e) => console.error("[realtime]", tabla, e));
+
+    const alVolverVisible = () => {
+      if (document.visibilityState === "visible") programar();
+    };
+    window.addEventListener("online", programar);
+    document.addEventListener("visibilitychange", alVolverVisible);
+    return () => {
+      activo = false;
+      if (temporizador) clearTimeout(temporizador);
+      window.removeEventListener("online", programar);
+      document.removeEventListener("visibilitychange", alVolverVisible);
+      quitar?.();
+    };
+  }, [tabla, filtro, evento, esperaMs]);
+}

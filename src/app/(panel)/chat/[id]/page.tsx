@@ -1,17 +1,23 @@
 import { unstable_rethrow } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getConversacion, getDirectorio, listConversaciones, listMensajes } from "@/lib/repos/chat";
+import {
+  getConversacion,
+  getDirectorio,
+  listConversaciones,
+  listMensajes,
+  type ConversacionDetalle,
+} from "@/lib/repos/chat";
 import { MENSAJES_POR_PAGINA } from "@/lib/chat/core";
 import { ChatLista } from "@/components/chat/ChatLista";
 import { ChatConversacion } from "@/components/chat/ChatConversacion";
 import { ChatNoDisponible } from "@/components/chat/ChatNoDisponible";
-import { ROL_LABEL, type CompaneroDirectorio, type Conversacion } from "@/lib/types";
+import { ROL_LABEL, type CompaneroDirectorio } from "@/lib/types";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Línea secundaria de la cabecera según el tipo de conversación. */
 function subtituloDe(
-  conv: Conversacion,
+  conv: ConversacionDetalle,
   yoId: string,
   directorio: CompaneroDirectorio[],
 ): string | undefined {
@@ -21,7 +27,7 @@ function subtituloDe(
     case "oficina":
       return `Canal de la oficina de ${conv.oficina ?? conv.nombre ?? ""}`.trim();
     case "cliente":
-      return "Conversación sobre el cliente";
+      return conv.cliente_oficina ? `Cliente · ${conv.cliente_oficina}` : "Cliente";
     case "directo": {
       const otroId = conv.usuario_a === yoId ? conv.usuario_b : conv.usuario_a;
       const otro = directorio.find((c) => c.id === otroId);
@@ -32,8 +38,16 @@ function subtituloDe(
 }
 
 /** UC-602/UC-603: bandeja (320 px) + conversación abierta, a toda la altura bajo la barra superior. */
-export default async function ChatConversacionPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+export default async function ChatConversacionPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ [clave: string]: string | string[] | undefined }>;
+}) {
+  const [{ id }, sp] = await Promise.all([params, searchParams]);
+  // ?m=<mensaje>: enlace de una notificación de mención (UC-605 AC-16).
+  const m = typeof sp.m === "string" && UUID.test(sp.m) ? sp.m.toLowerCase() : null;
 
   const supabase = await createClient();
   const {
@@ -74,8 +88,14 @@ export default async function ChatConversacionPage({ params }: { params: Promise
         <ChatConversacion
           key={conversacion.id}
           conversacionId={conversacion.id}
-          titulo={listada?.titulo ?? conversacion.nombre ?? "Conversación"}
+          titulo={listada?.titulo ?? conversacion.cliente_nombre ?? conversacion.nombre ?? "Conversación"}
           subtitulo={subtituloDe(conversacion, user.id, directorio)}
+          mensajeObjetivo={m}
+          enlaceCabecera={
+            conversacion.tipo === "cliente" && conversacion.cliente_id
+              ? { href: `/clientes/${conversacion.cliente_id}`, label: "Ver ficha" }
+              : undefined
+          }
           mensajesIniciales={mensajes}
           yo={{ id: user.id, nombre: yoNombre }}
           nombresIniciales={nombres}

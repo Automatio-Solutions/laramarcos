@@ -2,11 +2,14 @@ import "server-only";
 import { unstable_rethrow } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { MENSAJES_POR_RELLENO } from "@/lib/chat/core";
+import { ESTADO_LABEL } from "@/lib/estados";
 import type {
   CompaneroDirectorio,
   Conversacion,
   ConversacionListada,
+  EstadoTarea,
   Mensaje,
+  Oficina,
 } from "@/lib/types";
 
 // Chat interno (US-06). La visibilidad la decide la RLS (chat_puede_ver) y los
@@ -50,7 +53,7 @@ const ORDEN_TIPO: Record<Conversacion["tipo"], number> = {
   general: 0,
   oficina: 1,
   directo: 2,
-  cliente: 2,
+  cliente: 3,
 };
 
 /** Orden de la bandeja: General, canales de oficina y luego lo más reciente. */
@@ -97,7 +100,7 @@ export async function listConversaciones(): Promise<ConversacionListada[]> {
         titulo = nombres.get(otro(c) ?? "") ?? "Compañero";
         break;
       case "cliente":
-        titulo = c.nombre ?? cli?.razon_social ?? "Cliente";
+        titulo = cli?.razon_social ?? c.nombre ?? "Cliente";
         break;
       default:
         titulo = c.nombre ?? c.oficina ?? "General";
@@ -108,15 +111,101 @@ export async function listConversaciones(): Promise<ConversacionListada[]> {
   return lista.sort(compararConversaciones);
 }
 
-export async function getConversacion(id: string): Promise<Conversacion | null> {
+/** Conversación por id (null si no existe o la RLS no la deja ver), con el cliente si lo hay. */
+export async function getConversacion(id: string): Promise<ConversacionDetalle | null> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("conversaciones")
-    .select(SELECT_CONV)
+    .select(`${SELECT_CONV},cliente:clientes(razon_social,oficina)`)
     .eq("id", id)
     .maybeSingle();
   if (error) throw error;
-  return (data as Conversacion | null) ?? null;
+  if (!data) return null;
+  const { cliente, ...conv } = data as unknown as Conversacion & {
+    cliente: ClienteConv | ClienteConv[] | null;
+  };
+  const cli = Array.isArray(cliente) ? cliente[0] : cliente;
+  return {
+    ...conv,
+    cliente_nombre: cli?.razon_social ?? null,
+    cliente_oficina: cli?.oficina ?? null,
+  };
+}
+
+type ClienteConv = { razon_social: string; oficina: Oficina | null };
+
+/** Conversación con los datos del cliente (solo en hilos de cliente). */
+export type ConversacionDetalle = Conversacion & {
+  cliente_nombre: string | null;
+  cliente_oficina: Oficina | null;
+};
+
+/**
+ * UC-605: miembros activos de la conversación (quienes pueden verla), para el selector de
+ * @menciones y para validar las menciones al enviar. Vacío si el usuario no puede verla.
+ */
+export async function miembrosConversacion(
+  convId: string,
+): Promise<{ id: string; nombre: string }[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("chat_miembros", { p_conv: convId });
+  if (error) throw error;
+  return ((data ?? []) as { id: string; nombre: string }[]).filter((m) => m.id && m.nombre);
+}
+
+/**
+ * UC-606: crea (o devuelve) el hilo interno de un cliente. Lanza si el usuario no tiene
+ * acceso al cliente (42501) o si la función no existe todavía.
+ */
+export async function abrirConversacionCliente(clienteId: string): Promise<string> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("chat_abrir_cliente", { p_cliente: clienteId });
+  if (error) throw error;
+  if (typeof data !== "string" || !data) throw new Error("chat_abrir_cliente sin id");
+  return data;
+}
+
+export interface EnlaceResuelto {
+  titulo: string;
+  estado: string;
+}
+
+/**
+ * UC-608: títulos y estado de las tareas y clientes enlazados en los mensajes, con la RLS
+ * del usuario: lo que no devuelva (sin permiso o inexistente) se muestra "no disponible".
+ */
+export async function resolverEnlacesInternos(
+  tareaIds: string[],
+  clienteIds: string[],
+): Promise<{ tareas: Record<string, EnlaceResuelto>; clientes: Record<string, EnlaceResuelto> }> {
+  const supabase = await createClient();
+  const [tRes, cRes] = await Promise.all([
+    tareaIds.length
+      ? supabase.from("tareas").select("id,titulo,estado").in("id", tareaIds)
+      : Promise.resolve({ data: [], error: null }),
+    clienteIds.length
+      ? supabase.from("clientes").select("id,razon_social,activo,fecha_baja").in("id", clienteIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (tRes.error) throw tRes.error;
+  if (cRes.error) throw cRes.error;
+  const tareas: Record<string, EnlaceResuelto> = {};
+  for (const t of (tRes.data ?? []) as { id: string; titulo: string; estado: EstadoTarea }[]) {
+    tareas[t.id] = { titulo: t.titulo, estado: ESTADO_LABEL[t.estado] ?? t.estado };
+  }
+  const clientes: Record<string, EnlaceResuelto> = {};
+  for (const c of (cRes.data ?? []) as {
+    id: string;
+    razon_social: string;
+    activo: boolean | null;
+    fecha_baja: string | null;
+  }[]) {
+    clientes[c.id] = {
+      titulo: c.razon_social,
+      estado: c.fecha_baja || c.activo === false ? "Baja" : "Activo",
+    };
+  }
+  return { tareas, clientes };
 }
 
 /**

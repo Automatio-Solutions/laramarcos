@@ -9,6 +9,7 @@ import {
 } from "@/app/(panel)/tareas/[id]/adjuntos-actions";
 import { ESTADO_LABEL } from "@/lib/estados";
 import { EstadoSelect } from "@/components/EstadoSelect";
+import { ComentariosEnVivo } from "@/components/ComentariosEnVivo";
 import {
   addSubtareaAction, asignarSubtareaAction, setEstadoSubtareaAction, eliminarSubtareaAction,
   updateDescripcionAction, addComentarioAction, addDependenciaAction,
@@ -189,16 +190,17 @@ export async function TareaDetalleView({ id, enModal = false }: { id: string; en
 
         {/* ----- Columna derecha: comentarios + registro de actividad ----- */}
         <div className="space-y-8 lg:col-span-2 lg:border-l lg:border-border lg:pl-8">
-          {/* Comentarios + @menciones (UC-105) */}
+          {/* Comentarios + @menciones (UC-105), en tiempo real (UC-607) */}
           <section className="space-y-3">
             <h2 className="font-semibold text-fg">Comentarios</h2>
+            <ComentariosEnVivo tareaId={id} />
             <form action={addComentarioAction.bind(null, id)} className="space-y-2">
               <input name="texto" placeholder="Escribe un comentario… usa @nombre para mencionar" className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-fg" />
               <div className="flex justify-end">
                 <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-primary-hover)]">Enviar</button>
               </div>
             </form>
-            <ul className="space-y-3">
+            <ul className="space-y-3" aria-label="Comentarios de la tarea">
               {comentarios.map((c) => (
                 <li key={c.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
                   <div className="mb-1 flex justify-between text-xs text-fg-muted">
