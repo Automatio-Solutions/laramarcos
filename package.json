@@ -23,6 +23,7 @@
     "db:verify": "node scripts/db-apply.mjs && node scripts/rls-test.mjs",
     "db:presupuestos-test": "node scripts/presupuestos-test.mjs",
     "db:ocr-test": "node scripts/ocr-test.mjs",
+    "db:chat-test": "node scripts/chat-test.mjs",
     "seed:demo": "node scripts/seed-demo.mjs && node scripts/cargar-catalogo.mjs",
     "catalogo": "node scripts/cargar-catalogo.mjs",
     "e2e": "node scripts/e2e-test.mjs"

@@ -238,3 +238,47 @@ export interface ClienteInput {
   cuentas: CuentaInput[];
   sector_ids: string[];
 }
+
+/* ---------------------------------------------------------------------------
+ * Chat interno (US-06)
+ * ------------------------------------------------------------------------- */
+
+/** general = todo el despacho · oficina = canal de sede · directo = 1:1 · cliente = hilo de un cliente. */
+export type ChatTipo = "general" | "oficina" | "directo" | "cliente";
+
+export interface Conversacion {
+  id: string;
+  tipo: ChatTipo;
+  nombre: string | null;          // null en directos: se muestra el otro participante
+  oficina: Oficina | null;
+  cliente_id: string | null;
+  usuario_a: string | null;
+  usuario_b: string | null;
+  ultimo_mensaje_at: string | null;
+}
+
+/** Conversación tal y como se lista en la bandeja del chat. */
+export interface ConversacionListada extends Conversacion {
+  titulo: string;                 // nombre a mostrar (canal, compañero o cliente)
+  no_leidos: number;
+}
+
+export interface Mensaje {
+  id: string;
+  conversacion_id: string;
+  autor_id: string | null;
+  autor_nombre?: string | null;
+  texto: string;
+  menciones: string[];
+  editado_at: string | null;
+  borrado: boolean;
+  created_at: string;
+}
+
+/** Compañero activo del despacho (directorio del chat). */
+export interface CompaneroDirectorio {
+  id: string;
+  nombre: string;
+  oficina: Oficina | null;
+  rol: Rol;
+}
