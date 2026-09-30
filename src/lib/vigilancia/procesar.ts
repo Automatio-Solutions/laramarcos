@@ -9,6 +9,15 @@ import type { SectorRef } from "./clasificar";
 // romper los imports existentes.
 export type { ItemBoletin } from "./parsear";
 
+/**
+ * Creación automática de tareas urgentes DESACTIVADA (2026-09-30): el criterio
+ * de urgencia dejaba pasar casi todo el DOE y el reparto por cliente llenó el
+ * tablero con 218 tareas en tres semanas. Queda apagada hasta acordar con el
+ * despacho cómo quieren recibir los avisos. Las publicaciones y newsletters
+ * siguen generándose igual.
+ */
+export const CREAR_TAREAS_URGENTES = false;
+
 export interface ResultadoProceso {
   publicaciones_nuevas: number;
   newsletters: number;
@@ -71,7 +80,7 @@ export async function procesarBoletines(
 
   // 3) Tareas urgentes: una por cliente del sector afectado (UC-305)
   let tareas = 0;
-  for (const p of nuevas) {
+  for (const p of CREAR_TAREAS_URGENTES ? nuevas : []) {
     if (!p.urgente || !p.sector_id) continue;
 
     const { count } = await admin
