@@ -5,6 +5,8 @@ import { MENSAJES_POR_RELLENO } from "@/lib/chat/core";
 import { ESTADO_LABEL } from "@/lib/estados";
 import type {
   CompaneroDirectorio,
+  ResultadoBusqueda,
+  Rol,
   Conversacion,
   ConversacionListada,
   EstadoTarea,
@@ -18,8 +20,10 @@ import type {
 
 const SELECT_CONV =
   "id,tipo,nombre,oficina,cliente_id,usuario_a,usuario_b,ultimo_mensaje_at";
-const SELECT_MENSAJE =
-  "id,conversacion_id,autor_id,texto,menciones,editado_at,borrado,created_at";
+/** Columnas de un mensaje, incluido el adjunto (UC-610, migración 0023). */
+export const SELECT_MENSAJE =
+  "id,conversacion_id,autor_id,texto,menciones,editado_at,borrado,created_at," +
+  "adjunto_path,adjunto_nombre,adjunto_mime,adjunto_size";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
@@ -240,10 +244,9 @@ export async function listMensajes(
     .order("id", { ascending: false })
     .limit(limite);
   if (antesDe) query = query.lt("created_at", antesDe);
-
   const { data, error } = await query;
   if (error) throw error;
-  const mensajes = ((data ?? []) as Mensaje[]).reverse();
+  const mensajes = ((data ?? []) as unknown as Mensaje[]).reverse();
 
   const nombres = await resolverNombres(
     supabase,
@@ -283,7 +286,7 @@ export async function listMensajesPosteriores(
     .order("id", { ascending: true })
     .limit(limite);
   if (error) throw error;
-  const mensajes = (data ?? []) as Mensaje[];
+  const mensajes = (data ?? []) as unknown as Mensaje[];
   const nombres = await resolverNombres(
     supabase,
     mensajes.map((m) => m.autor_id).filter((id): id is string => !!id),
@@ -325,4 +328,62 @@ export async function totalNoLeidos(): Promise<number> {
     unstable_rethrow(e);
     return 0;
   }
+}
+
+/** Mensaje por id con la RLS del usuario (null si no existe o no lo puede ver). */
+export async function leerMensaje(id: string): Promise<Mensaje | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("mensajes")
+    .select(SELECT_MENSAJE)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as unknown as Mensaje | null) ?? null;
+}
+
+/** ¿El usuario ve la conversación? (la RLS decide; sirve para autorizar subidas). */
+export async function conversacionVisible(id: string): Promise<boolean> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("conversaciones").select("id").eq("id", id).maybeSingle();
+  if (error) throw error;
+  return !!data;
+}
+
+/** Rol del usuario autenticado (para moderar en el chat). Nunca lanza: null si no se sabe. */
+export async function rolActual(): Promise<Rol | null> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return null;
+    const { data } = await supabase.from("usuarios").select("rol").eq("id", user.id).maybeSingle();
+    return ((data as { rol?: Rol } | null)?.rol ?? null) as Rol | null;
+  } catch (e) {
+    unstable_rethrow(e);
+    return null;
+  }
+}
+
+/**
+ * UC-611: mensajes que contienen el texto buscado, SOLO de conversaciones visibles para el
+ * usuario y no borrados, del más reciente al más antiguo (función chat_buscar), con el
+ * nombre del autor.
+ */
+export async function buscarMensajesTexto(q: string, limite: number): Promise<ResultadoBusqueda[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("chat_buscar", { p_q: q, p_limite: limite });
+  if (error) throw error;
+  const filas = (data ?? []) as Omit<ResultadoBusqueda, "autor_nombre">[];
+  const nombres = await resolverNombres(
+    supabase,
+    filas.map((f) => f.autor_id).filter((id): id is string => !!id),
+  );
+  return filas.map((f) => ({
+    ...f,
+    texto: f.texto ?? "",
+    adjunto_nombre: f.adjunto_nombre ?? null,
+    autor_nombre: f.autor_id ? (nombres.get(f.autor_id) ?? null) : null,
+  }));
 }

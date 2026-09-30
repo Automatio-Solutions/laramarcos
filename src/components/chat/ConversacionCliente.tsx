@@ -1,8 +1,8 @@
 import { unstable_rethrow } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { buscarConversacionCliente, getDirectorio, listMensajes } from "@/lib/repos/chat";
+import { buscarConversacionCliente, getDirectorio, listMensajes, rolActual } from "@/lib/repos/chat";
 import { MENSAJES_POR_PAGINA } from "@/lib/chat/core";
-import type { CompaneroDirectorio } from "@/lib/types";
+import type { CompaneroDirectorio, Rol } from "@/lib/types";
 import { ChatConversacion } from "./ChatConversacion";
 import { HiloClienteNuevo } from "./HiloClienteNuevo";
 
@@ -40,6 +40,7 @@ export async function ConversacionCliente({
         mensajes: Awaited<ReturnType<typeof listMensajes>>;
         directorio: CompaneroDirectorio[];
         miembros: { id: string; nombre: string }[];
+        rol: Rol | null;
       }
     | null = null;
   try {
@@ -56,9 +57,10 @@ export async function ConversacionCliente({
       .maybeSingle();
     if (error) throw error;
     if (cliente) {
-      const [convId, directorio] = await Promise.all([
+      const [convId, directorio, rol] = await Promise.all([
         buscarConversacionCliente(clienteId),
         getDirectorio().catch(() => [] as CompaneroDirectorio[]),
+        rolActual(),
       ]);
       const mensajes = convId ? await listMensajes(convId, { limite: MENSAJES_POR_PAGINA }) : [];
       const yoNombre = directorio.find((c) => c.id === user.id)?.nombre ?? "Yo";
@@ -71,7 +73,7 @@ export async function ConversacionCliente({
             (c.oficina !== null && c.oficina === cliente.oficina),
         )
         .map((c) => ({ id: c.id, nombre: c.nombre }));
-      datos = { convId, yo: { id: user.id, nombre: yoNombre }, mensajes, directorio, miembros };
+      datos = { convId, yo: { id: user.id, nombre: yoNombre }, mensajes, directorio, miembros, rol };
     }
   } catch (e) {
     unstable_rethrow(e);
@@ -95,6 +97,7 @@ export async function ConversacionCliente({
           yo={datos.yo}
           nombresIniciales={nombresIniciales}
           enlaceCabecera={{ href: `/chat/${datos.convId}`, label: "Abrir en el chat" }}
+          rol={datos.rol}
         />
       ) : (
         <HiloClienteNuevo
@@ -104,6 +107,7 @@ export async function ConversacionCliente({
           yo={datos.yo}
           nombresIniciales={nombresIniciales}
           miembros={datos.miembros}
+          rol={datos.rol}
         />
       )}
     </div>

@@ -27,7 +27,13 @@ export function ConfirmModal({
 
   return (
     <div onClick={onCancel} className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
-      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-lg border border-border bg-surface p-6 shadow-xl">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={titulo}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-sm rounded-lg border border-border bg-surface p-6 shadow-xl"
+      >
         <h3 className="text-lg font-semibold text-primary">{titulo}</h3>
         <p className="mt-2 text-sm text-fg-muted">{mensaje}</p>
         <div className="mt-6 flex justify-end gap-3">

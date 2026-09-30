@@ -1,10 +1,16 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { abrirHiloCliente, buscarHiloCliente, enviarMensaje } from "@/app/(panel)/chat/actions";
-import { useAvisoMensajes } from "@/lib/chat/realtime";
+import {
+  abrirHiloCliente,
+  abrirHiloClienteYEnviar,
+  buscarHiloCliente,
+  enviarMensaje,
+  hiloClienteDeConversacion,
+} from "@/app/(panel)/chat/actions";
+import { useMensajesNuevos } from "@/lib/chat/realtime";
 import { mezclaMensajes } from "@/lib/chat/core";
-import type { Mensaje } from "@/lib/types";
+import type { Mensaje, Rol } from "@/lib/types";
 import { ChatComposer } from "./ChatComposer";
 import { ChatConversacion } from "./ChatConversacion";
 import type { Miembro } from "./MencionPicker";
@@ -26,6 +32,7 @@ export function HiloClienteNuevo({
   yo,
   nombresIniciales,
   miembros,
+  rol = null,
 }: {
   clienteId: string;
   titulo: string;
@@ -34,6 +41,8 @@ export function HiloClienteNuevo({
   nombresIniciales: Record<string, string>;
   /** Quienes verán el hilo (staff + la sede del cliente), para el selector de @. */
   miembros: Miembro[];
+  /** Rol del usuario, para moderar (UC-612). */
+  rol?: Rol | null;
 }) {
   const [abierta, setAbierta] = useState<{ id: string; mensajes: Mensaje[] } | null>(null);
   /** Mensajes escritos antes de que exista la conversación, en orden. */
@@ -46,18 +55,49 @@ export function HiloClienteNuevo({
   const conv = useRef<{ id: string; mensajes: Mensaje[] } | null>(null);
   const enCurso = useRef(false);
 
-  // Si otro compañero escribe el primer mensaje mientras tanto, llega un aviso de mensaje
-  // nuevo (la RLS filtra los eventos): se comprueba si ya existe el hilo y se engancha a él.
-  useAvisoMensajes(() => {
-    if (abierta || enCurso.current || cola.current.length > 0) return;
-    buscarHiloCliente(clienteId)
-      .then((r) => {
-        if (r && !enCurso.current && cola.current.length === 0) setAbierta(r);
-      })
-      .catch(() => {
-        // Sin red: se sigue en estado vacío; el siguiente aviso lo reintentará.
-      });
-  });
+  /** Conversaciones que ya se comprobó que NO son el hilo de este cliente (una consulta por cada una). */
+  const ajenas = useRef(new Set<string>());
+  /** Conversación que se está comprobando ahora (evita consultas duplicadas por ráfagas). */
+  const comprobando = useRef<string | null>(null);
+  /** Ya se pinta la conversación (o se está a punto): no se vuelve a enganchar. */
+  const abiertaRef = useRef(false);
+  const puedeEngancharse = () => !abiertaRef.current && !enCurso.current && cola.current.length === 0;
+  const engancharse = (r: { id: string; mensajes: Mensaje[] }, extra: Mensaje[] = []) => {
+    if (!puedeEngancharse()) return;
+    abiertaRef.current = true;
+    setAbierta({ id: r.id, mensajes: mezclaMensajes(r.mensajes, extra) });
+  };
+
+  // Si otro compañero escribe el primer mensaje, llega su INSERT por Realtime (la RLS filtra
+  // los eventos) con la fila completa. UNA llamada al servidor confirma que la conversación
+  // es el hilo de este cliente y trae sus últimos mensajes; se pinta al momento con ellos y
+  // con la fila recibida. Tras un corte (o al volver a la pestaña) se busca el hilo por cliente.
+  useMensajesNuevos(
+    (m) => {
+      const conv = m.conversacion_id;
+      if (!conv || !puedeEngancharse() || ajenas.current.has(conv) || comprobando.current === conv) return;
+      comprobando.current = conv;
+      hiloClienteDeConversacion(clienteId, conv)
+        .then((r) => {
+          if (r) engancharse(r, [m]);
+          else ajenas.current.add(conv);
+        })
+        .catch(() => {
+          // Sin red: se sigue en estado vacío; el siguiente evento o la reconexión lo reintentan.
+        })
+        .finally(() => {
+          if (comprobando.current === conv) comprobando.current = null;
+        });
+    },
+    () => {
+      if (!puedeEngancharse()) return;
+      buscarHiloCliente(clienteId)
+        .then((r) => {
+          if (r) engancharse(r);
+        })
+        .catch(() => {});
+    },
+  );
 
   /** Envía la cola en orden; al primer fallo se detiene y deja reintentar. */
   async function procesar() {
@@ -67,9 +107,20 @@ export function HiloClienteNuevo({
     setError(null);
     try {
       if (!conv.current) {
-        const r = await abrirHiloCliente(clienteId);
-        if ("error" in r) throw new Error(r.error);
-        conv.current = r;
+        const p = cola.current[0];
+        if (p) {
+          // Primer mensaje: abrir el hilo y enviarlo en una sola llamada.
+          const r = await abrirHiloClienteYEnviar(clienteId, p);
+          if ("error" in r) throw new Error(r.error);
+          conv.current = { id: r.id, mensajes: r.mensajes };
+          enviados.current.push(r.enviado);
+          cola.current = cola.current.slice(1);
+          setPendientes(cola.current);
+        } else {
+          const r = await abrirHiloCliente(clienteId);
+          if ("error" in r) throw new Error(r.error);
+          conv.current = r;
+        }
       }
       const { id } = conv.current;
       while (cola.current.length > 0) {
@@ -81,6 +132,7 @@ export function HiloClienteNuevo({
         cola.current = cola.current.slice(1);
         setPendientes(cola.current);
       }
+      abiertaRef.current = true;
       setAbierta({ id, mensajes: mezclaMensajes(conv.current.mensajes, enviados.current) });
     } catch (e) {
       setError(e instanceof Error && e.message ? e.message : "No se pudo enviar el mensaje.");
@@ -109,6 +161,7 @@ export function HiloClienteNuevo({
         yo={yo}
         nombresIniciales={nombresIniciales}
         enlaceCabecera={{ href: `/chat/${abierta.id}`, label: "Abrir en el chat" }}
+        rol={rol}
       />
     );
   }

@@ -273,6 +273,22 @@ export interface Mensaje {
   editado_at: string | null;
   borrado: boolean;
   created_at: string;
+  /** UC-610: adjunto (todos o ninguno). Opcionales: sin la migración 0023 no existen. */
+  adjunto_path?: string | null;
+  adjunto_nombre?: string | null;
+  adjunto_mime?: string | null;
+  adjunto_size?: number | null;
+}
+
+/** UC-611: resultado de la búsqueda de mensajes (función chat_buscar). */
+export interface ResultadoBusqueda {
+  id: string;
+  conversacion_id: string;
+  autor_id: string | null;
+  autor_nombre: string | null;
+  texto: string;
+  created_at: string;
+  adjunto_nombre: string | null;
 }
 
 /** Compañero activo del despacho (directorio del chat). */

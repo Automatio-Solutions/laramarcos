@@ -1,10 +1,15 @@
 "use client";
 
-import { useNoLeidos } from "@/lib/chat/realtime";
+import { useNoLeidos, usePresencia } from "@/lib/chat/realtime";
 
-/** UC-604 AC-02: total de mensajes sin leer junto a "Chat" en la barra lateral, en tiempo real. */
+/**
+ * UC-604 AC-02: total de mensajes sin leer junto a "Chat" en la barra lateral, en tiempo real.
+ * UC-613: como está en todas las páginas del panel, también anuncia la presencia del usuario
+ * ("conectado" mientras tenga la plataforma abierta).
+ */
 export function ChatBadge({ inicial }: { inicial: number }) {
   const { total } = useNoLeidos(inicial);
+  usePresencia();
   if (total <= 0) return null;
   return (
     <span

@@ -29,7 +29,8 @@
     "e2e": "node scripts/e2e-test.mjs",
     "db:chat-realtime-test": "node scripts/chat-realtime-test.mjs",
     "e2e:chat": "node scripts/chat-e2e-test.mjs",
-    "e2e:chat-fase2": "node scripts/chat-e2e-fase2-test.mjs"
+    "e2e:chat-fase2": "node scripts/chat-e2e-fase2-test.mjs",
+    "e2e:chat-fase3": "node scripts/chat-e2e-fase3-test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.69.0",

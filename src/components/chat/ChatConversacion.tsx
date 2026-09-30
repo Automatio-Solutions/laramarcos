@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
+  borrarMensaje,
   cargarAnteriores,
+  editarMensaje,
   enviarMensaje,
   marcarLeida,
   obtenerMiembros,
@@ -16,20 +18,29 @@ import {
   detectaEnlaces,
   etiquetaDia,
   mezclaMensajes,
+  puedeBorrarMensaje,
+  puedeEditarMensaje,
+  textoEscribiendo,
+  validaTextoMensaje,
+  type AdjuntoMensaje,
   type TipoEnlace,
 } from "@/lib/chat/core";
 import {
   avisarNoLeidos,
   limpiarConversacionAbierta,
   setConversacionAbierta,
+  useEscribiendo,
   useMensajesRealtime,
+  usePresencia,
   type CambioMensaje,
 } from "@/lib/chat/realtime";
-import type { Mensaje } from "@/lib/types";
+import type { Mensaje, Rol } from "@/lib/types";
+import { ConfirmModal } from "@/components/ConfirmModal";
 import { ChatComposer } from "./ChatComposer";
 import { ChatMensaje, type MensajeUI } from "./ChatMensaje";
 import type { EstadoEnlace } from "./EnlaceCard";
 import type { Miembro } from "./MencionPicker";
+import { PuntoConectado } from "./PuntoConectado";
 
 /** Distancia (px) al fondo por debajo de la cual se considera que el usuario "está abajo". */
 const UMBRAL_FONDO = 120;
@@ -66,6 +77,8 @@ export function ChatConversacion({
   mensajeObjetivo = null,
   enlaceCabecera,
   etiqueta,
+  rol = null,
+  contactoId = null,
 }: {
   conversacionId: string;
   titulo: string;
@@ -79,6 +92,10 @@ export function ChatConversacion({
   enlaceCabecera?: { href: string; label: string };
   /** Nombre accesible de la sección (por defecto "Conversación: <título>"). */
   etiqueta?: string;
+  /** Rol del usuario: responsable y administrador pueden borrar mensajes ajenos (UC-612). */
+  rol?: Rol | null;
+  /** En un directo, el otro participante (punto verde de conectado, UC-613). */
+  contactoId?: string | null;
 }) {
   const [mensajes, setMensajes] = useState<MensajeUI[]>(mensajesIniciales);
   const [hayMas, setHayMas] = useState(mensajesIniciales.length >= MENSAJES_POR_PAGINA);
@@ -105,6 +122,12 @@ export function ChatConversacion({
   const montado = useRef(true);
   const [reintentoEnlaces, setReintentoEnlaces] = useState(0);
   const [resaltadoId, setResaltadoId] = useState<string | null>(null);
+  const [aBorrar, setABorrar] = useState<MensajeUI | null>(null);
+  const [borrando, setBorrando] = useState(false);
+  const [errorBorrado, setErrorBorrado] = useState<string | null>(null);
+  const conectados = usePresencia();
+  const escribiendo = useEscribiendo(conversacionId, yo);
+  const quitarEscribiendo = escribiendo.quitar;
 
   useEffect(() => {
     mensajesRef.current = mensajes;
@@ -271,9 +294,11 @@ export function ChatConversacion({
       }
       if (pegadoAbajo.current) ajuste.current = { tipo: "fondo" };
       setMensajes((ms) => mezclaMensajes(ms, c.mensajes));
+      // Ha llegado su mensaje: deja de estar "escribiendo…".
+      for (const m of c.mensajes) if (m.autor_id && m.autor_id !== yo.id) quitarEscribiendo(m.autor_id);
       if (c.mensajes.some((m) => m.autor_id !== yo.id)) marcarPronto();
     },
-    [marcarPronto, yo.id],
+    [marcarPronto, yo.id, quitarEscribiendo],
   );
 
   const ultimaFecha = useCallback(() => {
@@ -374,7 +399,12 @@ export function ChatConversacion({
   }
 
   // ---- Envío optimista con reintento (UC-603 AC-03) ----
-  async function enviarConId(id: string, texto: string, menciones: string[] = []) {
+  async function enviarConId(
+    id: string,
+    texto: string,
+    menciones: string[] = [],
+    adjunto: AdjuntoMensaje | null = null,
+  ) {
     ajuste.current = { tipo: "fondo" };
     setMensajes((ms) => {
       const existente = ms.find((m) => m.id === id);
@@ -390,13 +420,17 @@ export function ChatConversacion({
         borrado: false,
         created_at: new Date().toISOString(),
         estado: "enviando",
+        adjunto_path: adjunto?.path ?? null,
+        adjunto_nombre: adjunto?.nombre ?? null,
+        adjunto_mime: adjunto?.mime ?? null,
+        adjunto_size: adjunto?.size ?? null,
       };
       return mezclaMensajes(ms, [optimista]);
     });
 
     let confirmado: Mensaje | null = null;
     try {
-      const r = await enviarMensaje({ id, conversacionId, texto, menciones });
+      const r = await enviarMensaje({ id, conversacionId, texto, menciones, adjunto });
       if ("mensaje" in r) confirmado = r.mensaje;
     } catch {
       // Sin conexión: se marca como no enviado.
@@ -410,6 +444,80 @@ export function ChatConversacion({
       );
     }
   }
+
+  /** Adjunto de un mensaje no enviado, para reintentarlo tal cual. */
+  function adjuntoDe(m: MensajeUI): AdjuntoMensaje | null {
+    return m.adjunto_path && m.adjunto_nombre && m.adjunto_mime && typeof m.adjunto_size === "number"
+      ? { path: m.adjunto_path, nombre: m.adjunto_nombre, mime: m.adjunto_mime, size: m.adjunto_size }
+      : null;
+  }
+
+  // ---- Editar y borrar (UC-612) ----
+  async function guardarEdicion(id: string, texto: string): Promise<string | null> {
+    const previo = mensajesRef.current.find((m) => m.id === id);
+    if (!previo) return "El mensaje ya no está disponible.";
+    const v = validaTextoMensaje(texto, !!previo.adjunto_path);
+    if (!v.ok) return v.error;
+    // Optimista: se ve al momento; si falla, se vuelve al texto anterior.
+    setMensajes((ms) =>
+      ms.map((m) => (m.id === id ? { ...m, texto: v.texto, editado_at: new Date().toISOString() } : m)),
+    );
+    let r: Awaited<ReturnType<typeof editarMensaje>>;
+    try {
+      r = await editarMensaje(id, v.texto);
+    } catch {
+      r = { error: "Sin conexión. No se pudo editar el mensaje." };
+    }
+    if ("error" in r) {
+      setMensajes((ms) =>
+        ms.map((m) => (m.id === id ? { ...m, texto: previo.texto, editado_at: previo.editado_at } : m)),
+      );
+      return r.error;
+    }
+    const fila = r.mensaje;
+    setMensajes((ms) => mezclaMensajes(ms, [fila]));
+    return null;
+  }
+
+  async function confirmarBorrado() {
+    const m = aBorrar;
+    if (!m || borrando) return;
+    setBorrando(true);
+    setErrorBorrado(null);
+    let r: Awaited<ReturnType<typeof borrarMensaje>>;
+    try {
+      r = await borrarMensaje(m.id);
+    } catch {
+      r = { error: "Sin conexión. No se pudo borrar el mensaje." };
+    }
+    setBorrando(false);
+    if ("error" in r) {
+      setErrorBorrado(r.error);
+      return;
+    }
+    setABorrar(null);
+    setMensajes((ms) =>
+      ms.map((x) =>
+        x.id === m.id
+          ? {
+              ...x,
+              borrado: true,
+              texto: "",
+              menciones: [],
+              adjunto_path: null,
+              adjunto_nombre: null,
+              adjunto_mime: null,
+              adjunto_size: null,
+            }
+          : x,
+      ),
+    );
+  }
+
+  const cancelarBorrado = useCallback(() => {
+    setABorrar(null);
+    setErrorBorrado(null);
+  }, []);
 
   function autorDe(m: MensajeUI): string {
     if (!m.autor_id) return "Usuario eliminado";
@@ -425,7 +533,10 @@ export function ChatConversacion({
     >
       <header className="flex shrink-0 items-center gap-3 border-b border-border px-5 py-3">
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-base font-semibold text-fg">{titulo}</h1>
+          <h1 className="flex items-center gap-2 truncate text-base font-semibold text-fg">
+            <span className="truncate">{titulo}</span>
+            {contactoId && conectados.has(contactoId) && <PuntoConectado />}
+          </h1>
           {subtitulo && <p className="truncate text-xs text-fg-muted">{subtitulo}</p>}
         </div>
         {enlaceCabecera && (
@@ -488,12 +599,19 @@ export function ChatConversacion({
                       key={m.id}
                       mensaje={m}
                       autor={autorDe(m)}
-                      onReintentar={(x) => void enviarConId(x.id, x.texto, x.menciones)}
+                      onReintentar={(x) => void enviarConId(x.id, x.texto, x.menciones, adjuntoDe(x))}
                       nombres={nombres}
                       yoId={yo.id}
                       enlaces={m.borrado ? [] : detectaEnlaces(m.texto)}
                       resolverEnlace={resolverEnlace}
                       resaltado={m.id === resaltadoId}
+                      puedeEditar={puedeEditarMensaje(m, yo.id)}
+                      puedeBorrar={puedeBorrarMensaje(m, yo.id, rol)}
+                      onGuardarEdicion={guardarEdicion}
+                      onBorrar={(x) => {
+                        setErrorBorrado(null);
+                        setABorrar(x);
+                      }}
                     />
                   ))}
                 </ul>
@@ -503,12 +621,42 @@ export function ChatConversacion({
         )}
       </div>
 
+      <div
+        role="status"
+        aria-live="polite"
+        data-escribiendo
+        className="h-5 shrink-0 truncate px-5 text-xs italic text-fg-muted"
+      >
+        {textoEscribiendo(escribiendo.nombres)}
+      </div>
+
       <ChatComposer
         placeholder={`Escribe en ${titulo}…`}
         miembros={miembros}
         yoId={yo.id}
-        onEnviar={(texto, menciones) => void enviarConId(crypto.randomUUID(), texto, menciones)}
+        conversacionId={conversacionId}
+        onEscribiendo={escribiendo.avisarEscribiendo}
+        onDejo={escribiendo.avisarDejo}
+        onEnviar={(texto, menciones, adjunto) =>
+          void enviarConId(crypto.randomUUID(), texto, menciones, adjunto)
+        }
       />
+
+      {aBorrar && (
+        <ConfirmModal
+          titulo="Borrar mensaje"
+          mensaje={
+            errorBorrado
+              ? `${errorBorrado} ¿Quieres intentarlo de nuevo?`
+              : "¿Borrar este mensaje? Esta acción no se puede deshacer."
+          }
+          confirmLabel="Borrar"
+          danger
+          pending={borrando}
+          onConfirm={() => void confirmarBorrado()}
+          onCancel={cancelarBorrado}
+        />
+      )}
     </section>
   );
 }
