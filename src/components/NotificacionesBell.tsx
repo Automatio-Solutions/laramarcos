@@ -51,6 +51,8 @@ export function NotificacionesBell({
                     onClick={() => { if (!n.leida) marcarLeidaAction(n.id); setOpen(false); }}
                     className="flex-1 text-fg hover:text-accent"
                   >
+                    {/* Mención en el chat (UC-605): el enlace lleva al mensaje (/chat/<id>?m=<mensaje>). */}
+                    {n.tipo === "mencion_chat" && <span aria-hidden className="mr-1">💬</span>}
                     {n.mensaje}
                   </Link>
                   {!n.leida && (

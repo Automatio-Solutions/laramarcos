@@ -1,5 +1,7 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ConversacionCliente } from "@/components/chat/ConversacionCliente";
 import { ClienteForm } from "@/components/ClienteForm";
 import { ServiciosContratados } from "@/components/ServiciosContratados";
 import { getCliente, listSectores, listAsesores, listServiciosCatalogo, getMiOficina } from "@/lib/repos/clientes";
@@ -56,6 +58,9 @@ export default async function EditarClientePage({
             📁 Abrir carpeta del cliente en el servidor
           </a>
         )}
+        <a href="#conversacion" className="ml-4 mt-2 inline-block text-sm font-medium text-accent hover:underline">
+          💬 Conversación interna
+        </a>
       </header>
       <ClienteForm action={action} sectores={sectores} asesores={asesores} cliente={cliente} miOficina={miOficina} />
 
@@ -96,6 +101,25 @@ export default async function EditarClientePage({
           </div>
         </div>
         <p className="text-xs text-fg-muted">Presupuestos (M2) y facturas OCR (M4) aparecerán aquí al implementar esos módulos.</p>
+      </section>
+
+      {/* Conversación interna del cliente (UC-606) */}
+      <section id="conversacion" aria-labelledby="conversacion-titulo" className="scroll-mt-4 space-y-3 border-t border-border pt-6">
+        <div>
+          <h2 id="conversacion-titulo" className="text-lg font-semibold text-primary">Conversación</h2>
+          <p className="text-sm text-fg-muted">
+            Hilo interno del despacho sobre este cliente. Solo lo ve quien tiene acceso a su ficha.
+          </p>
+        </div>
+        <Suspense
+          fallback={
+            <div className="flex h-[560px] items-center justify-center rounded-lg border border-border bg-surface text-sm text-fg-muted">
+              Cargando conversación…
+            </div>
+          }
+        >
+          <ConversacionCliente clienteId={id} clienteNombre={cliente.razon_social} />
+        </Suspense>
       </section>
     </div>
   );

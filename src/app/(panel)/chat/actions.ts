@@ -3,13 +3,25 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import {
+  abrirConversacionCliente,
+  buscarConversacionCliente,
+  getConversacion,
   listConversaciones,
   listMensajes,
   listMensajesPosteriores,
+  miembrosConversacion,
   noLeidosPorConversacion,
   nombresPorId,
+  resolverEnlacesInternos,
+  type EnlaceResuelto,
 } from "@/lib/repos/chat";
-import { MENSAJES_POR_PAGINA, totalNoLeidos, validaTextoMensaje } from "@/lib/chat/core";
+import {
+  MENSAJES_POR_PAGINA,
+  mencionesVigentes,
+  textoAvisoMencion,
+  totalNoLeidos,
+  validaTextoMensaje,
+} from "@/lib/chat/core";
 import type { ConversacionListada, Mensaje } from "@/lib/types";
 
 // Chat interno (US-06). Todas las acciones usan el cliente con la sesión del
@@ -28,11 +40,22 @@ function mensajeError(e: unknown, porDefecto: string): string {
   return porDefecto;
 }
 
-/** UC-603: envía un mensaje. El id lo genera el cliente (UI optimista y reintentos idempotentes). */
+/** Máximo de menciones por mensaje (evita avisos masivos). */
+const MAX_MENCIONES = 20;
+
+type Supabase = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * UC-603/UC-605: envía un mensaje. El id lo genera el cliente (UI optimista y reintentos
+ * idempotentes). Las menciones se validan en servidor: solo miembros de la conversación cuyo
+ * "@Nombre" siga en el texto y que no sean el autor. Cada mencionado recibe un aviso en la
+ * campana con enlace al mensaje; si el aviso falla, el mensaje se envía igualmente.
+ */
 export async function enviarMensaje(entrada: {
   id: string;
   conversacionId: string;
   texto: string;
+  menciones?: string[];
 }): Promise<{ mensaje: Mensaje } | Error_> {
   const { id, conversacionId } = entrada;
   if (!UUID.test(id) || !UUID.test(conversacionId)) return { error: "Mensaje no válido." };
@@ -45,14 +68,33 @@ export async function enviarMensaje(entrada: {
   } = await supabase.auth.getUser();
   if (!user) return { error: "Tu sesión ha caducado. Vuelve a entrar." };
 
+  const pedidas = [...new Set((entrada.menciones ?? []).filter((m) => UUID.test(m)))].slice(
+    0,
+    MAX_MENCIONES,
+  );
+  let miembros: { id: string; nombre: string }[] = [];
+  if (pedidas.length > 0) {
+    try {
+      miembros = await miembrosConversacion(conversacionId);
+    } catch (e) {
+      // Sin la función de miembros no se puede validar: se envía sin menciones.
+      console.error("[chat] miembros", e);
+    }
+  }
+  const menciones = mencionesVigentes(
+    v.texto,
+    miembros.filter((m) => pedidas.includes(m.id)),
+    user.id,
+  );
+
   const { data, error } = await supabase
     .from("mensajes")
-    .insert({ id, conversacion_id: conversacionId, autor_id: user.id, texto: v.texto })
+    .insert({ id, conversacion_id: conversacionId, autor_id: user.id, texto: v.texto, menciones })
     .select(SELECT_MENSAJE)
     .single();
 
   if (error) {
-    // Reintento de un envío que sí llegó a guardarse: devolvemos el existente.
+    // Reintento de un envío que sí llegó a guardarse: devolvemos el existente (sin volver a avisar).
     if (error.code === "23505") {
       const { data: existente } = await supabase
         .from("mensajes")
@@ -63,7 +105,76 @@ export async function enviarMensaje(entrada: {
     }
     return { error: mensajeError(error, "No se pudo enviar el mensaje.") };
   }
+
+  if (menciones.length > 0) {
+    const autor = miembros.find((m) => m.id === user.id)?.nombre ?? "Un compañero";
+    await avisarMenciones(supabase, conversacionId, id, autor, menciones);
+  }
   return { mensaje: data as Mensaje };
+}
+
+/** UC-605 AC-16: aviso en la campana para cada mencionado. Nunca lanza. */
+async function avisarMenciones(
+  supabase: Supabase,
+  conversacionId: string,
+  mensajeId: string,
+  autor: string,
+  menciones: string[],
+): Promise<void> {
+  try {
+    const conv = await getConversacion(conversacionId);
+    const texto = conv
+      ? textoAvisoMencion(autor, conv, conv.cliente_nombre)
+      : `${autor} te ha mencionado en el chat`;
+    const enlace = `/chat/${conversacionId}?m=${mensajeId}`;
+    const r = await Promise.allSettled(
+      menciones.map((uid) =>
+        supabase.rpc("crear_notificacion", {
+          p_usuario: uid,
+          p_tipo: "mencion_chat",
+          p_mensaje: texto,
+          p_enlace: enlace,
+        }),
+      ),
+    );
+    for (const x of r) {
+      if (x.status === "rejected") console.error("[chat] aviso mención", x.reason);
+      else if (x.value.error) console.error("[chat] aviso mención", x.value.error);
+    }
+  } catch (e) {
+    console.error("[chat] aviso mención", e);
+  }
+}
+
+/** UC-605 AC-15: miembros de la conversación para el selector de @menciones. */
+export async function obtenerMiembros(
+  conversacionId: string,
+): Promise<{ miembros: { id: string; nombre: string }[] } | Error_> {
+  if (!UUID.test(conversacionId)) return { error: "Conversación no disponible." };
+  try {
+    return { miembros: await miembrosConversacion(conversacionId) };
+  } catch (e) {
+    return { error: mensajeError(e, "No se pudieron cargar los miembros.") };
+  }
+}
+
+/**
+ * UC-608: resuelve enlaces a tareas y clientes con la RLS del usuario. Lo que no aparece en
+ * la respuesta no existe o no es visible para él ("Elemento no disponible").
+ */
+export async function resolverEnlaces(refs: {
+  tareas: string[];
+  clientes: string[];
+}): Promise<
+  { tareas: Record<string, EnlaceResuelto>; clientes: Record<string, EnlaceResuelto> } | Error_
+> {
+  const limpiar = (ids: string[] | undefined) =>
+    [...new Set((ids ?? []).filter((x) => UUID.test(x)).map((x) => x.toLowerCase()))].slice(0, 50);
+  try {
+    return await resolverEnlacesInternos(limpiar(refs?.tareas), limpiar(refs?.clientes));
+  } catch (e) {
+    return { error: mensajeError(e, "No se pudieron resolver los enlaces.") };
+  }
 }
 
 /** UC-602 AC-03: página de mensajes anteriores a `antesDe`. */
@@ -105,6 +216,43 @@ export async function marcarLeida(conversacionId: string): Promise<void> {
     if (error) console.error("[chat] marcarLeida", error);
   } catch (e) {
     console.error("[chat] marcarLeida", e);
+  }
+}
+
+/**
+ * UC-606: crea (o recupera, si otro compañero se adelantó) el hilo interno de un cliente al
+ * enviar el primer mensaje desde su ficha. Devuelve su id y los últimos mensajes que ya
+ * tuviera. chat_abrir_cliente comprueba el acceso con las reglas de la ficha (AC-19).
+ */
+export async function abrirHiloCliente(
+  clienteId: string,
+): Promise<{ id: string; mensajes: Mensaje[] } | Error_> {
+  if (!UUID.test(clienteId)) return { error: "Conversación no disponible." };
+  try {
+    const id = await abrirConversacionCliente(clienteId);
+    const mensajes = await listMensajes(id, { limite: MENSAJES_POR_PAGINA });
+    return { id, mensajes };
+  } catch (e) {
+    return { error: mensajeError(e, "No se pudo abrir la conversación del cliente.") };
+  }
+}
+
+/**
+ * UC-606: hilo de un cliente SI YA EXISTE (solo lectura), con sus últimos mensajes; null si
+ * aún no hay hilo o no es visible. Lo usa la ficha en estado vacío para engancharse cuando
+ * otro compañero escribe el primer mensaje.
+ */
+export async function buscarHiloCliente(
+  clienteId: string,
+): Promise<{ id: string; mensajes: Mensaje[] } | null> {
+  if (!UUID.test(clienteId)) return null;
+  try {
+    const id = await buscarConversacionCliente(clienteId);
+    if (!id) return null;
+    return { id, mensajes: await listMensajes(id, { limite: MENSAJES_POR_PAGINA }) };
+  } catch (e) {
+    mensajeError(e, "");
+    return null;
   }
 }
 

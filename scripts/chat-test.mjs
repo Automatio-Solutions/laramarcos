@@ -1,11 +1,14 @@
-// Test del chat interno (US-06 · UC-601..UC-604) — migración 0020.
+// Test del chat interno (US-06 · UC-601..UC-609) — migraciones 0020, 0021 y 0022.
 // Verifica visibilidad por tipo de conversación (general / oficina / directo /
 // cliente), directorio de compañeros, apertura idempotente de directos, RLS de
 // escritura de mensajes, contador de no leídos y trigger de actividad.
+// Fase 2 (0021): miembros de una conversación, apertura del hilo de cliente,
+// cambio de oficina y visibilidad de comentarios de tareas.
+// 0022: escritura de comentarios solo si se ve la tarea y tarea_quienes_ven.
 //
-// Todo ocurre en UNA transacción que SIEMPRE se revierte. Si la migración 0020
-// aún no está aplicada, se ejecuta dentro de esa misma transacción (y también se
-// revierte), así se puede validar antes de aplicarla.
+// Todo ocurre en UNA transacción que SIEMPRE se revierte. Las migraciones del
+// chat que aún no figuren en public._migrations se ejecutan dentro de esa misma
+// transacción (y también se revierten), así se pueden validar antes de aplicarlas.
 //
 // Uso: npm run db:chat-test   (requiere SUPABASE_DB_URL en .env.local)
 import { config } from 'dotenv';
@@ -18,7 +21,8 @@ import { dirname, join } from 'node:path';
 import pg from 'pg';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const MIGRACION = join(__dirname, '..', 'supabase', 'migrations', '0020_chat.sql');
+const MIGRACIONES = ['0020_chat.sql', '0021_chat_fase2.sql', '0022_comentarios_insert.sql'];
+const rutaMigracion = (f) => join(__dirname, '..', 'supabase', 'migrations', f);
 
 const url = process.env.SUPABASE_DB_URL;
 if (!url) {
@@ -42,6 +46,18 @@ async function asUser(id) {
 async function asSuperuser() {
   await q('reset role');
   await q(`set local request.jwt.claims = ''`);
+}
+/** Como falla(), pero devuelve el SQLSTATE del error (o null si no falló). */
+async function codigoError(sql, params) {
+  await q('savepoint sp');
+  try {
+    await q(sql, params);
+    await q('release savepoint sp');
+    return null;
+  } catch (e) {
+    await q('rollback to savepoint sp');
+    return e.code ?? 'desconocido';
+  }
 }
 /** Ejecuta una sentencia que DEBE fallar sin abortar la transacción (savepoint). */
 async function falla(sql, params) {
@@ -68,10 +84,15 @@ try {
   await client.connect();
   await q('begin');
 
-  const existe = await q(`select to_regclass('public.mensajes') as t`);
-  if (!existe.rows[0].t) {
-    console.log('  · 0020 no aplicada: se ejecuta dentro de la transacción (se revertirá)');
-    await q(readFileSync(MIGRACION, 'utf8'));
+  const hayRegistro = (await q(`select to_regclass('public._migrations') as t`)).rows[0].t;
+  const aplicadas = hayRegistro
+    ? new Set((await q('select name from public._migrations')).rows.map((r) => r.name))
+    : new Set();
+  for (const f of MIGRACIONES) {
+    if (!aplicadas.has(f)) {
+      console.log(`  · ${f} no aplicada: se ejecuta dentro de la transacción (se revertirá)`);
+      await q(readFileSync(rutaMigracion(f), 'utf8'));
+    }
   }
 
   // --- Fixtures (como owner, RLS no aplica). Alta "ayer" para que los mensajes
@@ -215,6 +236,225 @@ try {
     check(`Cliente · ${nombre} ${esperado ? 'SÍ' : 'NO'} ve la conversación del cliente de Badajoz`, r.rowCount === esperado);
     await asSuperuser();
   }
+
+  // --- Fase 2 · Miembros de una conversación (chat_miembros) ---
+  const miembros = async (conv) =>
+    ids(await q('select id from public.chat_miembros($1)', [conv])).filter((id) => fixtures.includes(id));
+  await asUser(asesorBdj);
+  const mGen = await miembros(general);
+  check('Miembros · General devuelve los 3 activos',
+    mGen.length === 3 && [resp, asesorBdj, asesorCas].every((id) => mGen.includes(id)));
+  check('Miembros · General NO incluye al inactivo', !mGen.includes(inactivo));
+  const mBdj = await miembros(canal('Badajoz'));
+  check('Miembros · canal Badajoz → responsable + asesor Badajoz',
+    mBdj.length === 2 && mBdj.includes(resp) && mBdj.includes(asesorBdj));
+  check('Miembros · canal Badajoz NO incluye al asesor de Castuera ni al inactivo',
+    !mBdj.includes(asesorCas) && !mBdj.includes(inactivo));
+  const mDir = await miembros(d1);
+  check('Miembros · directo → exactamente los 2 participantes',
+    mDir.length === 2 && mDir.includes(asesorBdj) && mDir.includes(asesorCas));
+  const mCli = await miembros(cc);
+  check('Miembros · cliente de Badajoz → responsable + asesor Badajoz, no Castuera',
+    mCli.length === 2 && mCli.includes(resp) && mCli.includes(asesorBdj) && !mCli.includes(asesorCas));
+  const ordenGen = (await q('select id from public.chat_miembros($1)', [general])).rows.map((r) => r.id);
+  await asSuperuser();
+  const ordenEsperado = ids(await q('select id from public.usuarios where activo order by nombre'));
+  check('Miembros · General: todos los activos, ordenados por nombre',
+    JSON.stringify(ordenGen) === JSON.stringify(ordenEsperado));
+  await asUser(asesorCas);
+  const mAjeno = await q('select id from public.chat_miembros($1)', [canal('Badajoz')]);
+  check('Miembros · quien no ve la conversación recibe 0 filas', mAjeno.rowCount === 0);
+  await asSuperuser();
+  await asUser(inactivo);
+  const mInac = await q('select id from public.chat_miembros($1)', [general]);
+  check('Miembros · un usuario inactivo recibe 0 filas', mInac.rowCount === 0);
+  await asSuperuser();
+
+  // --- Fase 2 · Abrir hilo de cliente (chat_abrir_cliente) ---
+  await asUser(asesorBdj);
+  const ac1 = (await q('select public.chat_abrir_cliente($1) as id', [clienteBdj])).rows[0].id;
+  const ac2 = (await q('select public.chat_abrir_cliente($1) as id', [clienteBdj])).rows[0].id;
+  check('Abrir cliente · asesor Badajoz obtiene el hilo del cliente', !!ac1 && ac1 === cc);
+  check('Abrir cliente · abrirlo dos veces devuelve el mismo id', ac1 === ac2);
+  await asSuperuser();
+  await asUser(asesorCas);
+  check('Abrir cliente · asesor Castuera → 42501 (no autorizado)',
+    (await codigoError('select public.chat_abrir_cliente($1)', [clienteBdj])) === '42501');
+  await asSuperuser();
+  await asUser(resp);
+  const ac3 = (await q('select public.chat_abrir_cliente($1) as id', [clienteBdj])).rows[0].id;
+  check('Abrir cliente · el responsable obtiene el mismo id', ac3 === ac1);
+  await asSuperuser();
+  // Cliente sin hilo previo → se crea uno nuevo (una sola vez).
+  const clienteBdj2 = randomUUID();
+  await q(`insert into public.clientes (id, cif, razon_social, oficina)
+           values ($1, 'B99999991', 'Cliente Chat Badajoz 2', 'Badajoz')`, [clienteBdj2]);
+  await asUser(asesorBdj);
+  const nuevo1 = (await q('select public.chat_abrir_cliente($1) as id', [clienteBdj2])).rows[0].id;
+  const nuevo2 = (await q('select public.chat_abrir_cliente($1) as id', [clienteBdj2])).rows[0].id;
+  const nuevoVis = await q('select tipo from public.conversaciones where id = $1', [nuevo1]);
+  check('Abrir cliente · crea el hilo si no existía y es visible como tipo cliente',
+    !!nuevo1 && nuevo1 === nuevo2 && nuevoVis.rows[0]?.tipo === 'cliente');
+  await asSuperuser();
+  await asUser(inactivo);
+  check('Abrir cliente · usuario inactivo → 42501',
+    (await codigoError('select public.chat_abrir_cliente($1)', [clienteBdj])) === '42501');
+  await asSuperuser();
+
+  // --- Fase 2 · Comentarios de tareas (UC-607) ---
+  // Visibilidad vigente de tareas (0002/0003): staff, responsable de la tarea,
+  // asesor_id del cliente (si el cliente le es visible) o asignado de alguna subtarea.
+  const asesorResp = randomUUID(); // asesor (no staff) responsable de la tarea
+  await q(`insert into auth.users (id, instance_id, aud, role, email, created_at, updated_at)
+           values ($1, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'chat-arsp@test.lm', now(), now())`,
+          [asesorResp]);
+  await q(`insert into public.usuarios (id, email, nombre, rol, oficina, activo)
+           values ($1, 'chat-arsp@test.lm', 'ZZ Chat Asesor Responsable', 'asesor', 'Don Benito', true)`, [asesorResp]);
+  const tarea = randomUUID(), sub = randomUUID();
+  await q(`insert into public.tareas (id, titulo, responsable_id) values ($1, 'Tarea chat fase 2', $2)`, [tarea, asesorResp]);
+  await q(`insert into public.subtareas (id, tarea_id, titulo, asignado_id) values ($1, $2, 'Subtarea chat', $3)`,
+    [sub, tarea, asesorBdj]);
+  const cTareaResp = randomUUID(), cSubResp = randomUUID(), cTareaArsp = randomUUID(), cSubBdj = randomUUID();
+  await q(`insert into public.comentarios (id, tarea_id, subtarea_id, autor_id, texto) values
+           ($1, $5, null, $7, 'Resp en tarea'),
+           ($2, null, $6, $7, 'Resp en subtarea'),
+           ($3, $5, null, $8, 'Responsable de tarea en tarea'),
+           ($4, null, $6, $9, 'Asignado en subtarea')`,
+    [cTareaResp, cSubResp, cTareaArsp, cSubBdj, tarea, sub, resp, asesorResp, asesorBdj]);
+  const todos = [cTareaResp, cSubResp, cTareaArsp, cSubBdj];
+  const comentariosVistos = async (quien) => {
+    await asUser(quien);
+    const r = ids(await q('select id from public.comentarios where id = any($1::uuid[])', [todos]));
+    await asSuperuser();
+    return r;
+  };
+  const vBdj = await comentariosVistos(asesorBdj);
+  check('Comentarios · el asignado ve el comentario del responsable en la tarea', vBdj.includes(cTareaResp));
+  check('Comentarios · el asignado ve el comentario del responsable en la subtarea', vBdj.includes(cSubResp));
+  check('Comentarios · el asignado ve los 4 comentarios de la tarea', vBdj.length === 4);
+  const vCas = await comentariosVistos(asesorCas);
+  check('Comentarios · un asesor ajeno no ve ninguno', vCas.length === 0);
+  const vArsp = await comentariosVistos(asesorResp);
+  check('Comentarios · el responsable de la tarea (no staff) ve todos', vArsp.length === 4);
+  const vResp = await comentariosVistos(resp);
+  check('Comentarios · el staff ve todos', vResp.length === 4);
+
+  // fn_puede_ver_tarea replica exactamente la RLS de SELECT de tareas.
+  const tareaCliCas = randomUUID(), tareaCliBdj = randomUUID();
+  await q(`update public.clientes set asesor_id = $1 where id = $2`, [asesorBdj, clienteBdj]);
+  await q(`update public.clientes set asesor_id = $1 where id = $2`, [asesorCas, clienteBdj2]);
+  await q(`insert into public.tareas (id, titulo, cliente_id) values ($1, 'T cliente asesor Bdj', $2), ($3, 'T cliente asesor Cas', $4)`,
+    [tareaCliBdj, clienteBdj, tareaCliCas, clienteBdj2]);
+  let coherente = true;
+  for (const quien of [resp, asesorBdj, asesorCas, asesorResp, inactivo]) {
+    await asUser(quien);
+    for (const t of [tarea, tareaCliBdj, tareaCliCas]) {
+      const rls = (await q('select count(*)::int as n from public.tareas where id = $1', [t])).rows[0].n === 1;
+      const fn = (await q('select public.fn_puede_ver_tarea($1) as v', [t])).rows[0].v;
+      if (rls !== fn) { coherente = false; console.log(`    · discrepancia usuario=${quien} tarea=${t} rls=${rls} fn=${fn}`); }
+    }
+    await asSuperuser();
+  }
+  check('Comentarios · fn_puede_ver_tarea coincide con la RLS de tareas (5 usuarios × 3 tareas)', coherente);
+  await asUser(asesorCas);
+  const casCli = await q('select public.fn_puede_ver_tarea($1) as v', [tareaCliCas]);
+  check('Comentarios · asesor_id de un cliente de OTRA sede no da acceso (igual que la RLS)', casCli.rows[0].v === false);
+  await asSuperuser();
+
+  // --- 0022 · Escritura de comentarios: solo quien ve la tarea ---
+  const insCom = (tareaId, subId, autor) => codigoError(
+    'insert into public.comentarios (tarea_id, subtarea_id, autor_id, texto) values ($1, $2, $3, $4)',
+    [tareaId, subId, autor, 'comentario de prueba']);
+  await asUser(asesorCas);
+  check('Comentarios · un asesor ajeno NO puede comentar en una tarea que no ve (42501)',
+    (await insCom(tarea, null, asesorCas)) === '42501');
+  check('Comentarios · un asesor ajeno NO puede comentar en una subtarea de una tarea que no ve (42501)',
+    (await insCom(null, sub, asesorCas)) === '42501');
+  check('Comentarios · asesor_id de un cliente de OTRA sede NO puede comentar en su tarea',
+    (await insCom(tareaCliCas, null, asesorCas)) === '42501');
+  await asSuperuser();
+  await asUser(asesorBdj);
+  check('Comentarios · el asignado de una subtarea SÍ puede comentar en la tarea',
+    (await insCom(tarea, null, asesorBdj)) === null);
+  check('Comentarios · el asignado SÍ puede comentar en su subtarea',
+    (await insCom(null, sub, asesorBdj)) === null);
+  check('Comentarios · asesor_id de un cliente de su sede SÍ puede comentar en su tarea',
+    (await insCom(tareaCliBdj, null, asesorBdj)) === null);
+  check('Comentarios · NO se puede comentar firmando como otro usuario',
+    (await insCom(tarea, null, resp)) === '42501');
+  await asSuperuser();
+  await asUser(asesorResp);
+  check('Comentarios · el responsable de la tarea (no staff) SÍ puede comentar',
+    (await insCom(tarea, null, asesorResp)) === null);
+  await asSuperuser();
+  await asUser(resp);
+  check('Comentarios · el staff SÍ puede comentar en cualquier tarea',
+    (await insCom(tareaCliCas, null, resp)) === null);
+  await asSuperuser();
+
+  // --- 0022 · tarea_quienes_ven = usuarios activos que pasan la RLS de tareas ---
+  const activos = ids(await q('select id from public.usuarios where activo'));
+  let quienesOk = true;
+  for (const t of [tarea, tareaCliBdj, tareaCliCas]) {
+    const esperados = [];
+    for (const u of activos) {
+      await asUser(u);
+      if ((await q('select 1 from public.tareas where id = $1', [t])).rowCount === 1) esperados.push(u);
+      await asSuperuser();
+    }
+    await asUser(resp);
+    const devueltos = ids(await q('select id from public.tarea_quienes_ven($1)', [t]));
+    await asSuperuser();
+    const a = [...esperados].sort(), b = [...devueltos].sort();
+    if (JSON.stringify(a) !== JSON.stringify(b)) {
+      quienesOk = false;
+      console.log(`    · discrepancia tarea=${t} rls=${a.length} fn=${b.length}`);
+    }
+  }
+  check(`tarea_quienes_ven · coincide con la RLS de tareas por usuario (${activos.length} activos × 3 tareas)`, quienesOk);
+  await asUser(asesorBdj);
+  const qvBdj = ids(await q('select id from public.tarea_quienes_ven($1)', [tarea]));
+  check('tarea_quienes_ven · incluye responsable, asignado y staff; excluye al ajeno y al inactivo',
+    [asesorResp, asesorBdj, resp].every((id) => qvBdj.includes(id)) &&
+    !qvBdj.includes(asesorCas) && !qvBdj.includes(inactivo));
+  await asSuperuser();
+  await asUser(asesorCas);
+  check('tarea_quienes_ven · quien no ve la tarea recibe 0 filas',
+    (await q('select id from public.tarea_quienes_ven($1)', [tarea])).rowCount === 0);
+  check('fn_usuario_ve_tarea · no se puede llamar desde la API (42501)',
+    (await codigoError('select public.fn_usuario_ve_tarea($1, $2)', [asesorBdj, tarea])) === '42501');
+  await asSuperuser();
+  await asUser(inactivo);
+  check('tarea_quienes_ven · un usuario inactivo recibe 0 filas',
+    (await q('select id from public.tarea_quienes_ven($1)', [tarea])).rowCount === 0);
+  await asSuperuser();
+  await asUser(resp);
+  check('tarea_quienes_ven · tarea inexistente → 0 filas',
+    (await q('select id from public.tarea_quienes_ven($1)', [randomUUID()])).rowCount === 0);
+  await asSuperuser();
+
+  const pubCom = await q(`select 1 from pg_publication_tables
+                           where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'comentarios'`);
+  const hayPub = (await q(`select 1 from pg_publication where pubname = 'supabase_realtime'`)).rowCount === 1;
+  check('Realtime · comentarios publicado en supabase_realtime', !hayPub || pubCom.rowCount === 1);
+
+  // --- Fase 2 · Cambio de oficina (UC-609 · AC-26) ---
+  await asUser(asesorCas);
+  await q('insert into public.mensajes (conversacion_id, autor_id, texto) values ($1,$2,$3)',
+    [canal('Castuera'), asesorCas, 'Hola Castuera']);
+  await asSuperuser();
+  await q(`update public.usuarios set oficina = 'Castuera' where id = $1`, [asesorBdj]);
+  await asUser(asesorBdj);
+  const trasCambio = ids(await q(`select id from public.conversaciones where tipo = 'oficina'`));
+  check('Cambio de oficina · deja de ver el canal de Badajoz', !trasCambio.includes(canal('Badajoz')));
+  const msgViejos = await q('select id from public.mensajes where conversacion_id = $1', [canal('Badajoz')]);
+  check('Cambio de oficina · deja de ver los mensajes de Badajoz', msgViejos.rowCount === 0);
+  check('Cambio de oficina · pasa a ver el canal de Castuera', trasCambio.includes(canal('Castuera')));
+  const msgNuevos = await q('select id from public.mensajes where conversacion_id = $1', [canal('Castuera')]);
+  check('Cambio de oficina · pasa a ver los mensajes de Castuera', msgNuevos.rowCount >= 1);
+  const mCas = (await miembros(canal('Castuera')));
+  check('Cambio de oficina · figura como miembro del canal de Castuera', mCas.includes(asesorBdj));
+  await asSuperuser();
 
   // --- Usuario inactivo ---
   await asUser(inactivo);
