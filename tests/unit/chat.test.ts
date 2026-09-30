@@ -39,6 +39,9 @@ import {
   tipoAdjunto,
   validaAdjunto,
   validaAdjuntoMensaje,
+  extensionAdjuntoAdmitida,
+  nombreConExtension,
+  urlDescargaAdjunto,
 } from "../../src/lib/chat/core.ts";
 
 // "Ahora" fijo: miércoles 30-09-2026, 12:00 en Madrid (CEST, UTC+2).
@@ -492,4 +495,25 @@ test("textoEscribiendo: uno, dos, tres y varias personas", () => {
   assert.equal(textoEscribiendo(["Ana", "Ana"]), "Ana está escribiendo…");
   assert.equal(textoEscribiendo(["Ana", "Bruno", "Carla"]), "Ana, Bruno y Carla están escribiendo…");
   assert.equal(textoEscribiendo(["A", "B", "C", "D"]), "Varias personas están escribiendo…");
+});
+
+test("extensionAdjuntoAdmitida / nombreConExtension: el nombre guardado siempre lleva extensión admitida", () => {
+  assert.equal(extensionAdjuntoAdmitida("Factura.PDF"), true);
+  assert.equal(extensionAdjuntoAdmitida("hoja.xlsx"), true);
+  assert.equal(extensionAdjuntoAdmitida("factura"), false);
+  assert.equal(extensionAdjuntoAdmitida("virus.exe"), false);
+  assert.equal(nombreConExtension("escaneo", "image/png"), "escaneo.png");
+  assert.equal(nombreConExtension("Informe.pdf", "application/pdf"), "Informe.pdf");
+  // Sin extensión, aunque el navegador diga un tipo admitido, el servidor lo rechaza.
+  const bueno = { path: `${CONV}/${OBJ}/escaneo`, nombre: "escaneo", mime: "image/png", size: 10 };
+  assert.equal(validaAdjuntoMensaje(bueno, CONV).ok, false);
+});
+
+test("urlDescargaAdjunto: el nombre va codificado UNA vez (tildes, & y espacios)", () => {
+  const firmada = "https://x.supabase.co/storage/v1/object/sign/chat/c/u/Nomina.pdf?token=abc";
+  const url = urlDescargaAdjunto(firmada, "Nómina & IRPF 2026.pdf");
+  assert.equal(url, `${firmada}&download=N%C3%B3mina%20%26%20IRPF%202026.pdf`);
+  assert.equal(new URL(url).searchParams.get("download"), "Nómina & IRPF 2026.pdf");
+  assert.ok(!url.includes("%25"));
+  assert.equal(urlDescargaAdjunto("https://x/a", "a.pdf"), "https://x/a?download=a.pdf");
 });

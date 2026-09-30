@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { urlDescargaAdjunto } from "@/lib/chat/core";
 
 // UC-610 AC-29/AC-31: descarga de un adjunto del chat. El mensaje se lee con la RLS del
 // usuario (chat_puede_ver): si no es miembro de la conversación, no lo ve y recibe 404.
@@ -42,18 +43,17 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const verEnLinea =
     req.nextUrl.searchParams.get("ver") === "1" &&
     (mime === "application/pdf" || mime.startsWith("image/"));
+  // Se firma SIN la opción `download` y se añade aquí (codificada una sola vez): la del SDK
+  // codifica dos veces y rompe los nombres con tildes o "&" (ver urlDescargaAdjunto).
   const { data, error: e2 } = await createAdminClient()
     .storage.from("chat")
-    .createSignedUrl(
-      m.adjunto_path,
-      VALIDEZ_S,
-      verEnLinea ? undefined : { download: m.adjunto_nombre || true },
-    );
+    .createSignedUrl(m.adjunto_path, VALIDEZ_S);
   if (e2 || !data) {
     console.error("[chat] adjunto", e2);
     return NextResponse.json({ error: "no disponible" }, { status: 500, headers: sinCache });
   }
-  const res = NextResponse.redirect(data.signedUrl, 302);
+  const destino = verEnLinea ? data.signedUrl : urlDescargaAdjunto(data.signedUrl, m.adjunto_nombre);
+  const res = NextResponse.redirect(destino, 302);
   res.headers.set("Cache-Control", "private, no-store");
   return res;
 }

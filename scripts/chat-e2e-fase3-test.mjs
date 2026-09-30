@@ -241,7 +241,12 @@ try {
   await filaAdj.getByRole("button", { name: "Borrar mensaje" }).click();
   await pA.getByRole("dialog", { name: "Borrar mensaje" }).getByRole("button", { name: "Borrar", exact: true }).click();
   await hasta(async () => (await admin.from("mensajes").select("borrado").eq("id", msgAdj.id).single()).data?.borrado === true, 6000);
-  const { data: tras2 } = await admin.storage.from("chat").list(msgAdj.adjunto_path.split("/").slice(0, 2).join("/"));
+  // El servidor borra el fichero justo después de marcar el mensaje: se espera a que ocurra.
+  let tras2 = [];
+  await hasta(async () => {
+    ({ data: tras2 } = await admin.storage.from("chat").list(msgAdj.adjunto_path.split("/").slice(0, 2).join("/")));
+    return (tras2 ?? []).length === 0;
+  }, 8000);
   chk("El fichero del mensaje borrado se elimina del almacén", (tras2 ?? []).length === 0, `${(tras2 ?? []).length}`);
   const resTras = await ctxB.request.get(B + href, { maxRedirects: 0 });
   chk("…y su enlace deja de funcionar", resTras.status() === 404, `${resTras.status()}`);

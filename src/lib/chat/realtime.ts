@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
-import { cargarPosteriores, obtenerNoLeidos } from "@/app/(panel)/chat/actions";
+import { cargarPosteriores, cargarUltimos, obtenerNoLeidos } from "@/app/(panel)/chat/actions";
 import {
   ESCRIBIENDO_CADA_MS,
   ESCRIBIENDO_CADUCA_MS,
@@ -101,7 +101,10 @@ export type CambioMensaje =
 /**
  * UC-603 AC-01: cambios en los mensajes de una conversación.
  * Al suscribirse, tras una reconexión o al volver la red / la pestaña, recupera los mensajes
- * posteriores al último conocido (`ultimaFecha`) y los entrega como `upsert`.
+ * posteriores al último conocido (`ultimaFecha`) y los entrega como `upsert`. En las
+ * reconexiones y al volver (no en la primera suscripción, que ya trae el render inicial)
+ * también relee la última página: las ediciones y borrados hechos durante el corte llegan
+ * así como filas del servidor que sustituyen a las locales.
  */
 export function useMensajesRealtime(
   conversacionId: string,
@@ -121,10 +124,17 @@ export function useMensajesRealtime(
 
     // Pide páginas hasta que una venga incompleta (con tope), así un corte largo
     // no deja un hueco permanente en el hilo.
-    const rellenar = async () => {
+    const rellenar = async (releerVentana: boolean) => {
       let desde = ultimaRef.current();
       if (!desde) return;
       let recuperados: Mensaje[] = [];
+      // En paralelo con el relleno: la última página tal como está ahora en el servidor.
+      const ventana = releerVentana
+        ? cargarUltimos(conversacionId).then(
+            (r) => ("mensajes" in r ? r.mensajes : []),
+            () => [] as Mensaje[],
+          )
+        : Promise.resolve([] as Mensaje[]);
       try {
         for (let i = 0; i < MAX_PAGINAS_RELLENO && activo; i++) {
           const r = await cargarPosteriores(conversacionId, desde);
@@ -136,6 +146,7 @@ export function useMensajesRealtime(
       } catch {
         // Sin red: se entrega lo recuperado y se reintentará en la siguiente reconexión.
       }
+      recuperados = mezclaMensajes(await ventana, recuperados);
       if (activo && recuperados.length > 0) {
         onCambioRef.current({ tipo: "upsert", mensajes: recuperados });
       }
@@ -144,6 +155,7 @@ export function useMensajesRealtime(
     clienteRealtime()
       .then((supabase) => {
         if (!activo) return;
+        let primeraSuscripcion = true;
         const canal = supabase
           .channel(nombreCanal(`mensajes:${conversacionId}`))
           .on(
@@ -166,7 +178,9 @@ export function useMensajesRealtime(
           .subscribe((estado) => {
             // Cada SUBSCRIBED (el primero y los de cada reconexión) rellena el hueco:
             // lo escrito entre el render en servidor y la suscripción, o durante el corte.
-            if (estado === "SUBSCRIBED") void rellenar();
+            if (estado !== "SUBSCRIBED") return;
+            void rellenar(!primeraSuscripcion);
+            primeraSuscripcion = false;
           });
         quitar = () => void supabase.removeChannel(canal);
       })
@@ -174,7 +188,7 @@ export function useMensajesRealtime(
 
     // Red recuperada o pestaña de nuevo visible: rellenamos por si se perdió algo.
     const alVolver = () => {
-      if (document.visibilityState === "visible") void rellenar();
+      if (document.visibilityState === "visible") void rellenar(true);
     };
     window.addEventListener("online", alVolver);
     document.addEventListener("visibilitychange", alVolver);
@@ -242,6 +256,59 @@ export function useAvisoMensajes(alCambiar: () => void) {
       if (temporizador) clearTimeout(temporizador);
       window.removeEventListener(EVENTO_NO_LEIDOS, programar);
       window.removeEventListener("online", programar);
+      document.removeEventListener("visibilitychange", alVolverVisible);
+      quitar?.();
+    };
+  }, []);
+}
+
+/**
+ * UC-606: mensajes nuevos de cualquier conversación visible (la RLS filtra los eventos), con
+ * la fila completa, sin debounce: la ficha de un cliente sin hilo engancha el hilo en cuanto
+ * llega su primer mensaje. `onResync` se llama tras una reconexión del canal, al volver la
+ * red o al volver a ver la pestaña, por si se perdió el evento durante el corte.
+ */
+export function useMensajesNuevos(onNuevo: (m: Mensaje) => void, onResync: () => void) {
+  const onNuevoRef = useRef(onNuevo);
+  const onResyncRef = useRef(onResync);
+  useEffect(() => {
+    onNuevoRef.current = onNuevo;
+    onResyncRef.current = onResync;
+  });
+
+  useEffect(() => {
+    let activo = true;
+    let quitar: (() => void) | null = null;
+    const resync = () => {
+      if (activo) onResyncRef.current();
+    };
+
+    clienteRealtime()
+      .then((supabase) => {
+        if (!activo) return;
+        let primeraSuscripcion = true;
+        const canal = supabase
+          .channel(nombreCanal("mensajes-ficha"))
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "mensajes" }, (payload) => {
+            if (activo) onNuevoRef.current(payload.new as Mensaje);
+          })
+          .subscribe((estado) => {
+            if (estado !== "SUBSCRIBED") return;
+            if (primeraSuscripcion) primeraSuscripcion = false;
+            else resync();
+          });
+        quitar = () => void supabase.removeChannel(canal);
+      })
+      .catch((e) => console.error("[chat] realtime", e));
+
+    const alVolverVisible = () => {
+      if (document.visibilityState === "visible") resync();
+    };
+    window.addEventListener("online", resync);
+    document.addEventListener("visibilitychange", alVolverVisible);
+    return () => {
+      activo = false;
+      window.removeEventListener("online", resync);
       document.removeEventListener("visibilitychange", alVolverVisible);
       quitar?.();
     };

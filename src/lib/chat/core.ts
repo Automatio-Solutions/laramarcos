@@ -577,10 +577,40 @@ export function validaAdjuntoMensaje(
   }
   const limpio = limpiaNombreAdjunto(nombre);
   if (!limpio) return { ok: false, error: "Adjunto no válido." };
+  if (!extensionAdjuntoAdmitida(limpio)) return { ok: false, error: ERROR_TIPO_ADJUNTO };
   if (!Number.isInteger(size)) return { ok: false, error: "Adjunto no válido." };
   const v = validaAdjunto(limpio, typeof mime === "string" ? mime : null, size);
   if (!v.ok) return v;
   return { ok: true, adjunto: { path, nombre: limpio, mime: v.mime, size } };
+}
+
+/** ¿El nombre termina en una extensión admitida? (lo exige también la BBDD, 0024). */
+export function extensionAdjuntoAdmitida(nombre: string): boolean {
+  const partes = (nombre ?? "").toLowerCase().split(".");
+  return partes.length > 1 && (partes.pop() ?? "") in MIME_ADJUNTO_POR_EXT;
+}
+
+/**
+ * Nombre con extensión admitida: si el fichero no la trae (solo se aceptó por el tipo que
+ * informa el navegador), se le añade la que corresponde a `mime`. Así el nombre guardado
+ * siempre pasa la lista de extensiones (validaAdjunto en servidor y CHECK de la BBDD).
+ */
+export function nombreConExtension(nombre: string, mime: string): string {
+  if (extensionAdjuntoAdmitida(nombre)) return nombre;
+  const ext = Object.entries(MIME_ADJUNTO_POR_EXT).find(([, m]) => m === mime)?.[0];
+  return ext ? `${nombre}.${ext}` : nombre;
+}
+
+/**
+ * URL de descarga con el nombre original: añade `download=<nombre>` a una URL firmada de
+ * Storage creada SIN la opción `download`. storage-js (2.108) aplica `encodeURI` después de
+ * `URLSearchParams`, lo que codifica dos veces ("%" → "%25") y el navegador guardaba
+ * "N%C3%B3mina %26 IRPF.pdf". Codificado una sola vez, Storage responde
+ * `Content-Disposition: attachment; filename*=UTF-8''N%C3%B3mina%20%26%20IRPF.pdf`.
+ */
+export function urlDescargaAdjunto(urlFirmada: string, nombre: string | null | undefined): string {
+  const sep = urlFirmada.includes("?") ? "&" : "?";
+  return `${urlFirmada}${sep}download=${encodeURIComponent(nombre ?? "")}`;
 }
 
 export type TipoAdjunto = "pdf" | "imagen" | "excel" | "word" | "otro";

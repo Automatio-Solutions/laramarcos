@@ -8,6 +8,8 @@
 // Fase 3 (0023): adjuntos (checks + bucket 'chat'), búsqueda sin tildes
 // (chat_buscar), edición/borrado (política + trigger + auditoría) y canales
 // privados de Realtime (presencia / escribiendo).
+// 0024: un adjunto (ruta de Storage) pertenece a un solo mensaje y su nombre
+// termina en una extensión admitida.
 //
 // Todo ocurre en UNA transacción que SIEMPRE se revierte. Las migraciones del
 // chat que aún no figuren en public._migrations se ejecutan dentro de esa misma
@@ -24,7 +26,10 @@ import { dirname, join } from 'node:path';
 import pg from 'pg';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const MIGRACIONES = ['0020_chat.sql', '0021_chat_fase2.sql', '0022_comentarios_insert.sql', '0023_chat_fase3.sql'];
+const MIGRACIONES = [
+  '0020_chat.sql', '0021_chat_fase2.sql', '0022_comentarios_insert.sql', '0023_chat_fase3.sql',
+  '0024_chat_adjuntos_unicos.sql',
+];
 const rutaMigracion = (f) => join(__dirname, '..', 'supabase', 'migrations', f);
 
 const url = process.env.SUPABASE_DB_URL;
@@ -514,6 +519,15 @@ try {
     (await insMsg(colsAdj, [cBdj, asesorBdj, 'hoja', `${cBdj}/${randomUUID()}/a.xlsx`, 'a.xlsx',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 10])) === null &&
     (await insMsg(colsAdj, [cBdj, asesorBdj, 'doc', `${cBdj}/${randomUUID()}/a.doc`, 'a.doc', 'application/msword', 10])) === null);
+  // 0024 · integridad de los adjuntos
+  check('Adjuntos · reutilizar la ruta de otro mensaje → rechazado (23505)',
+    (await insMsg(colsAdj, [cBdj, asesorBdj, 'copia', pathOk, 'Copia.pdf', PDF, 100])) === '23505');
+  check('Adjuntos · nombre con extensión no admitida ("x.exe") → rechazado (23514)',
+    (await insMsg(colsAdj, [cBdj, asesorBdj, '', `${cBdj}/${randomUUID()}/x.pdf`, 'x.exe', PDF, 100])) === '23514');
+  check('Adjuntos · nombre sin extensión → rechazado (23514)',
+    (await insMsg(colsAdj, [cBdj, asesorBdj, '', `${cBdj}/${randomUUID()}/factura`, 'factura', PDF, 100])) === '23514');
+  check('Adjuntos · extensión en mayúsculas ("SCAN.JPG") → permitido',
+    (await insMsg(colsAdj, [cBdj, asesorBdj, '', `${cBdj}/${randomUUID()}/SCAN.JPG`, 'SCAN.JPG', 'image/jpeg', 100])) === null);
   await asSuperuser();
   const bucket = (await q(`select public, file_size_limit, allowed_mime_types from storage.buckets where id = 'chat'`)).rows[0];
   check('Adjuntos · bucket "chat" existe, privado, 20 MB y 9 tipos MIME',

@@ -13,6 +13,7 @@ import {
   insertaMencion,
   mencionCompletada,
   mencionesVigentes,
+  nombreConExtension,
   validaAdjunto,
   validaTextoMensaje,
   type AdjuntoMensaje,
@@ -148,17 +149,24 @@ export function ChatComposer({
     if (adjunto?.path) void descartarAdjunto(conversacionId, adjunto.path);
     const clave = crypto.randomUUID();
     subidaActual.current = clave;
-    setAdjunto({ clave, nombre: file.name, size: file.size, mime: v.mime, estado: "subiendo" });
+    // Sin extensión (aceptado por el tipo del navegador): se le añade la de su tipo.
+    const nombre = nombreConExtension(file.name, v.mime);
+    setAdjunto({ clave, nombre, size: file.size, mime: v.mime, estado: "subiendo" });
     let mensajeError = ERROR_SUBIDA_ADJUNTO;
     try {
-      const prep = await prepararAdjunto(conversacionId, file.name, file.type || v.mime, file.size);
+      const prep = await prepararAdjunto(conversacionId, nombre, file.type || v.mime, file.size);
       if ("error" in prep) {
         mensajeError = prep.error;
         throw new Error(prep.error);
       }
       const { error: e } = await createClient()
         .storage.from("chat")
-        .uploadToSignedUrl(prep.path, prep.token, file, { contentType: prep.mime });
+        // Con un Blob, storage-js sube en multipart y Storage guarda el tipo de la PARTE (el
+        // del navegador), no `contentType`: se re-etiqueta con el tipo de la extensión, que es
+        // el que el servidor exige al enviar (metadatos reales del objeto).
+        .uploadToSignedUrl(prep.path, prep.token, file.slice(0, file.size, prep.mime), {
+          contentType: prep.mime,
+        });
       if (e) throw e;
       if (subidaActual.current !== clave) {
         // Se quitó (o se cambió) mientras subía: no se usa.

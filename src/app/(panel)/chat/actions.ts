@@ -7,7 +7,7 @@ import {
   abrirConversacionCliente,
   buscarConversacionCliente,
   buscarMensajesTexto,
-  conColumnasMensaje,
+  SELECT_MENSAJE,
   conversacionVisible,
   leerMensaje,
   getConversacion,
@@ -23,7 +23,10 @@ import {
 import {
   BUSQUEDA_LIMITE,
   BUSQUEDA_MIN_CARACTERES,
+  ERROR_TIPO_ADJUNTO,
   MENSAJES_POR_PAGINA,
+  extensionAdjuntoAdmitida,
+  mimeAdjunto,
   esStaffChat,
   mencionesVigentes,
   saneaNombreAdjunto,
@@ -56,6 +59,69 @@ function mensajeError(e: unknown, porDefecto: string): string {
 const MAX_MENCIONES = 20;
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
+type Admin = ReturnType<typeof createAdminClient>;
+
+/**
+ * ¿Algún mensaje (no borrado) usa este objeto de Storage? Con el cliente de servicio: la
+ * RLS del usuario no ve todas las conversaciones. El índice único de 0024 ya impide que dos
+ * mensajes compartan ruta; esto es la segunda barrera antes de borrar un fichero. Ante la
+ * duda (error de consulta) responde true: mejor un huérfano que borrar un fichero ajeno.
+ */
+async function adjuntoEnUso(admin: Admin, path: string): Promise<boolean> {
+  const { data, error } = await admin
+    .from("mensajes")
+    .select("id")
+    .eq("adjunto_path", path)
+    .eq("borrado", false)
+    .limit(1);
+  if (error) {
+    console.error("[chat] adjuntoEnUso", error);
+    return true;
+  }
+  return (data ?? []).length > 0;
+}
+
+/** Borra un objeto del bucket del chat solo si ningún mensaje lo usa. Nunca lanza. */
+async function quitarObjetoSiLibre(admin: Admin, path: string, contexto: string): Promise<void> {
+  try {
+    if (await adjuntoEnUso(admin, path)) return;
+    const { error } = await admin.storage.from(BUCKET_CHAT).remove([path]);
+    if (error) console.error(`[chat] ${contexto}`, error);
+  } catch (e) {
+    console.error(`[chat] ${contexto}`, e);
+  }
+}
+
+/**
+ * UC-610: metadatos REALES del objeto subido (tamaño y tipo que guardó Storage), no los que
+ * declara el navegador. Error si no existe o si no son admisibles para el nombre dado; en
+ * ese caso el objeto se elimina (si ningún mensaje lo usa).
+ */
+async function metadatosReales(
+  admin: Admin,
+  adjunto: AdjuntoMensaje,
+): Promise<{ ok: true; mime: string; size: number } | { ok: false; error: string }> {
+  const { data, error } = await admin.storage.from(BUCKET_CHAT).info(adjunto.path);
+  if (error || !data) return { ok: false, error: "El archivo no se ha subido. Vuelve a adjuntarlo." };
+  const meta = (data.metadata ?? {}) as { size?: unknown; mimetype?: unknown };
+  const size = Number(data.size ?? meta.size);
+  const mime = String(data.contentType ?? meta.mimetype ?? "").split(";")[0].trim().toLowerCase();
+  // El tipo real debe ser admitido y coincidir con el de la extensión del nombre.
+  const esperado = mimeAdjunto(adjunto.nombre);
+  let motivo: string | null = null;
+  if (!esperado || mime !== esperado) motivo = ERROR_TIPO_ADJUNTO;
+  else if (!Number.isInteger(size)) motivo = "Adjunto no válido.";
+  else {
+    // Mismas reglas que al elegir el fichero (vacío, más de 20 MB).
+    const v = validaAdjunto(adjunto.nombre, mime, size);
+    if (!v.ok) motivo = v.error;
+  }
+  if (motivo) {
+    await quitarObjetoSiLibre(admin, adjunto.path, "adjunto rechazado");
+    return { ok: false, error: motivo };
+  }
+  return { ok: true, mime, size };
+}
 
 /**
  * UC-603/UC-605/UC-610: envía un mensaje. El id lo genera el cliente (UI optimista y
@@ -90,11 +156,11 @@ export async function enviarMensaje(entrada: {
   if (!user) return { error: "Tu sesión ha caducado. Vuelve a entrar." };
 
   if (adjunto) {
+    // Tamaño y tipo se toman del objeto que guardó Storage, no de lo que declaró el navegador.
     try {
-      const { data: existe, error } = await createAdminClient()
-        .storage.from(BUCKET_CHAT)
-        .exists(adjunto.path);
-      if (error || !existe) return { error: "El archivo no se ha subido. Vuelve a adjuntarlo." };
+      const real = await metadatosReales(createAdminClient(), adjunto);
+      if (!real.ok) return { error: real.error };
+      adjunto = { ...adjunto, mime: real.mime, size: real.size };
     } catch (e) {
       return { error: mensajeError(e, "No se pudo comprobar el archivo adjunto.") };
     }
@@ -133,15 +199,19 @@ export async function enviarMensaje(entrada: {
     fila.adjunto_size = adjunto.size;
   }
 
-  const { data, error } = await conColumnasMensaje((cols) =>
-    supabase.from("mensajes").insert(fila).select(cols).single(),
-  );
+  const { data, error } = await supabase
+    .from("mensajes")
+    .insert(fila)
+    .select(SELECT_MENSAJE)
+    .single();
 
   if (error) {
     // Reintento de un envío que sí llegó a guardarse: devolvemos el existente (sin volver a avisar).
     if (error.code === "23505") {
       const existente = await leerMensaje(id).catch(() => null);
       if (existente) return { mensaje: existente };
+      // 0024: la ruta del adjunto ya la usa otro mensaje (no se toca ese fichero).
+      if (adjunto) return { error: "Ese archivo ya está en otro mensaje. Vuelve a adjuntarlo." };
     }
     return { error: mensajeError(error, "No se pudo enviar el mensaje.") };
   }
@@ -168,6 +238,8 @@ export async function prepararAdjunto(
   if (!UUID.test(conversacionId)) return { error: "Conversación no disponible." };
   const v = validaAdjunto(String(nombre ?? ""), mime, Number(size));
   if (!v.ok) return { error: v.error };
+  // El nombre guardado debe llevar una extensión admitida (CHECK de 0024).
+  if (!extensionAdjuntoAdmitida(String(nombre))) return { error: ERROR_TIPO_ADJUNTO };
   try {
     const supabase = await createClient();
     const {
@@ -203,16 +275,7 @@ export async function descartarAdjunto(conversacionId: string, path: string): Pr
       data: { user },
     } = await supabase.auth.getUser();
     if (!user || !(await conversacionVisible(conversacionId))) return;
-    const admin = createAdminClient();
-    const { data: usado } = await admin
-      .from("mensajes")
-      .select("id")
-      .eq("adjunto_path", path)
-      .limit(1)
-      .maybeSingle();
-    if (usado) return;
-    const { error } = await admin.storage.from(BUCKET_CHAT).remove([path]);
-    if (error) console.error("[chat] descartarAdjunto", error);
+    await quitarObjetoSiLibre(createAdminClient(), path, "descartarAdjunto");
   } catch (e) {
     console.error("[chat] descartarAdjunto", e);
   }
@@ -239,16 +302,14 @@ export async function editarMensaje(
     const v = validaTextoMensaje(texto ?? "", !!actual.adjunto_path);
     if (!v.ok) return { error: v.error };
 
-    const { data, error } = await conColumnasMensaje((cols) =>
-      supabase
-        .from("mensajes")
-        .update({ texto: v.texto })
-        .eq("id", id)
-        .eq("autor_id", user.id)
-        .eq("borrado", false)
-        .select(cols)
-        .maybeSingle(),
-    );
+    const { data, error } = await supabase
+      .from("mensajes")
+      .update({ texto: v.texto })
+      .eq("id", id)
+      .eq("autor_id", user.id)
+      .eq("borrado", false)
+      .select(SELECT_MENSAJE)
+      .maybeSingle();
     if (error) return { error: mensajeError(error, "No se pudo editar el mensaje.") };
     if (!data) return { error: "No se pudo editar el mensaje." };
     return { mensaje: data as unknown as Mensaje };
@@ -290,10 +351,8 @@ export async function borrarMensaje(id: string): Promise<{ ok: true } | Error_> 
     if (error) return { error: mensajeError(error, "No se pudo borrar el mensaje.") };
     if (!data) return { error: "No se pudo borrar el mensaje." };
 
-    if (ruta) {
-      const { error: e2 } = await createAdminClient().storage.from(BUCKET_CHAT).remove([ruta]);
-      if (e2) console.error("[chat] borrar adjunto", e2);
-    }
+    // Solo si ningún otro mensaje usa el fichero (el borrado ya dejó la ruta de este a null).
+    if (ruta) await quitarObjetoSiLibre(createAdminClient(), ruta, "borrar adjunto");
     return { ok: true };
   } catch (e) {
     return { error: mensajeError(e, "No se pudo borrar el mensaje.") };
@@ -397,6 +456,21 @@ export async function cargarAnteriores(
   }
 }
 
+/**
+ * Tras una reconexión de Realtime: la última página de la conversación tal como está ahora,
+ * para recoger ediciones y borrados hechos durante el corte (el relleno solo trae lo nuevo).
+ */
+export async function cargarUltimos(
+  conversacionId: string,
+): Promise<{ mensajes: Mensaje[] } | Error_> {
+  if (!UUID.test(conversacionId)) return { error: "Conversación no disponible." };
+  try {
+    return { mensajes: await listMensajes(conversacionId, { limite: MENSAJES_POR_PAGINA }) };
+  } catch (e) {
+    return { error: mensajeError(e, "No se pudieron recuperar los mensajes.") };
+  }
+}
+
 /** Relleno tras reconexión de Realtime: mensajes posteriores a `despuesDe`. */
 export async function cargarPosteriores(
   conversacionId: string,
@@ -441,6 +515,29 @@ export async function abrirHiloCliente(
 }
 
 /**
+ * UC-606: primer envío desde la ficha en UNA llamada: abre (o recupera) el hilo del cliente y
+ * envía el mensaje, leyendo en paralelo los que ya tuviera. Ahorra una ida y vuelta frente a
+ * abrirHiloCliente + enviarMensaje, que es lo que más pesa en la latencia del primer mensaje.
+ */
+export async function abrirHiloClienteYEnviar(
+  clienteId: string,
+  primero: { id: string; texto: string; menciones?: string[] },
+): Promise<{ id: string; mensajes: Mensaje[]; enviado: Mensaje } | Error_> {
+  if (!UUID.test(clienteId)) return { error: "Conversación no disponible." };
+  try {
+    const id = await abrirConversacionCliente(clienteId);
+    const [envio, mensajes] = await Promise.all([
+      enviarMensaje({ ...primero, conversacionId: id }),
+      listMensajes(id, { limite: MENSAJES_POR_PAGINA }),
+    ]);
+    if ("error" in envio) return envio;
+    return { id, mensajes, enviado: envio.mensaje };
+  } catch (e) {
+    return { error: mensajeError(e, "No se pudo abrir la conversación del cliente.") };
+  }
+}
+
+/**
  * UC-606: hilo de un cliente SI YA EXISTE (solo lectura), con sus últimos mensajes; null si
  * aún no hay hilo o no es visible. Lo usa la ficha en estado vacío para engancharse cuando
  * otro compañero escribe el primer mensaje.
@@ -453,6 +550,38 @@ export async function buscarHiloCliente(
     const id = await buscarConversacionCliente(clienteId);
     if (!id) return null;
     return { id, mensajes: await listMensajes(id, { limite: MENSAJES_POR_PAGINA }) };
+  } catch (e) {
+    mensajeError(e, "");
+    return null;
+  }
+}
+
+/**
+ * UC-606: la ficha (sin hilo todavía) recibe por Realtime un mensaje de la conversación
+ * `conversacionId`. En UNA llamada comprueba que es el hilo de ESTE cliente y devuelve sus
+ * últimos mensajes (consultas en paralelo); null si no lo es o no es visible.
+ */
+export async function hiloClienteDeConversacion(
+  clienteId: string,
+  conversacionId: string,
+): Promise<{ id: string; mensajes: Mensaje[] } | null> {
+  if (!UUID.test(clienteId) || !UUID.test(conversacionId)) return null;
+  try {
+    const supabase = await createClient();
+    const [conv, mensajes] = await Promise.all([
+      supabase
+        .from("conversaciones")
+        .select("id,tipo,cliente_id")
+        .eq("id", conversacionId)
+        .maybeSingle(),
+      listMensajes(conversacionId, { limite: MENSAJES_POR_PAGINA }),
+    ]);
+    if (conv.error) throw conv.error;
+    const c = conv.data as { id: string; tipo: string; cliente_id: string | null } | null;
+    if (!c || c.tipo !== "cliente" || c.cliente_id?.toLowerCase() !== clienteId.toLowerCase()) {
+      return null;
+    }
+    return { id: c.id, mensajes };
   } catch (e) {
     mensajeError(e, "");
     return null;
