@@ -62,3 +62,15 @@ body {
   color: var(--color-fg);
   font-family: var(--font-jakarta), system-ui, sans-serif;
 }
+
+/* Chat interno: entrada sutil de mensajes nuevos (150 ms). */
+@keyframes chat-entra {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
+.chat-entra {
+  animation: chat-entra 150ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-entra { animation: none; }
+}

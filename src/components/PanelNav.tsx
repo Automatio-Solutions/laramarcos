@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ChatBadge } from "@/components/chat/ChatBadge";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: "📊" },
   { href: "/tareas", label: "Tareas", icon: "✅" },
+  { href: "/chat", label: "Chat", icon: "💬" },
   { href: "/archivo", label: "Archivo", icon: "🗄️", staff: true },
   { href: "/clientes", label: "Clientes", icon: "👥" },
   { href: "/presupuestos", label: "Presupuestos", icon: "🧾" },
@@ -19,7 +21,13 @@ const NAV = [
   { href: "/usuarios", label: "Usuarios", icon: "👤", staff: true },
 ];
 
-export function PanelNav({ esStaff = false }: { esStaff?: boolean }) {
+export function PanelNav({
+  esStaff = false,
+  chatNoLeidos = 0,
+}: {
+  esStaff?: boolean;
+  chatNoLeidos?: number;
+}) {
   const pathname = usePathname();
   return (
     <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
@@ -35,6 +43,7 @@ export function PanelNav({ esStaff = false }: { esStaff?: boolean }) {
           >
             <span aria-hidden>{item.icon}</span>
             {item.label}
+            {item.href === "/chat" && <ChatBadge inicial={chatNoLeidos} />}
           </Link>
         );
       })}
