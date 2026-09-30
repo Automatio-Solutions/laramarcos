@@ -204,6 +204,17 @@ test("resolverClienteCarpeta: por código, NIF o nombre (en cualquier orden)", (
   assert.equal(resolverClienteCarpeta("TALLERES VEGAS SL", "Badajoz", CLIENTES)?.id, "b");
 });
 
+test("resolverClienteCarpeta: clientes del piloto con su nombre de carpeta", () => {
+  const piloto: ClienteCarpeta[] = [
+    { id: "g", codigo: "1001", cif: "J06670020", razon_social: "GARCIN Y REGO, S.C.", oficina: "Badajoz" },
+    { id: "o", codigo: "1063", cif: "B75783233", razon_social: "OBRAS DIAZ-QUINTANA, S.L.", oficina: "Badajoz" },
+    { id: "p", codigo: "1042", cif: "B44686012", razon_social: "PREVENCION Y CONTROL SI, S.L.", oficina: "Badajoz" },
+  ];
+  assert.equal(resolverClienteCarpeta("GARCIN & REGO, S.C.", "Badajoz", piloto)?.id, "g");        // & = Y
+  assert.equal(resolverClienteCarpeta("OBRAS DIAZ QUINTANA, S.L.", "Badajoz", piloto)?.id, "o");  // sin guion
+  assert.equal(resolverClienteCarpeta("PREVENCION Y CONTROL SI, S.L.", "Badajoz", piloto)?.id, "p");
+});
+
 test("resolverClienteCarpeta: ante la duda, ninguno", () => {
   // Código de otra oficina: no se asigna a un cliente de Don Benito.
   assert.equal(resolverClienteCarpeta("1001", "Don Benito", CLIENTES), null);
