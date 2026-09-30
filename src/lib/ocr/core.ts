@@ -310,13 +310,14 @@ export interface ClienteCarpeta {
   oficina: string | null;
 }
 
-/** Mayúsculas, sin acentos ni signos, espacios simples. "S.L." → "SL". */
+/** Mayúsculas, sin acentos ni signos, espacios simples. "S.L." → "SL", "&" → "Y". */
 export function normalizaTexto(s: string): string {
   return s
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .toUpperCase()
     .replace(/\./g, "")
+    .replace(/&/g, " Y ")
     .replace(/[^A-Z0-9Ñ ]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
