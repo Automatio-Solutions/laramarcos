@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  ficherosHuerfanos,
   MENSAJES_POR_PAGINA,
   agrupaPorDia,
   buscaMencionActiva,
@@ -516,4 +517,20 @@ test("urlDescargaAdjunto: el nombre va codificado UNA vez (tildes, & y espacios)
   assert.equal(new URL(url).searchParams.get("download"), "Nómina & IRPF 2026.pdf");
   assert.ok(!url.includes("%25"));
   assert.equal(urlDescargaAdjunto("https://x/a", "a.pdf"), "https://x/a?download=a.pdf");
+});
+
+test("ficherosHuerfanos: solo los no usados y con más de 24 h", () => {
+  const ahora = new Date("2026-10-02T12:00:00Z");
+  const objetos = [
+    { ruta: "c1/a/viejo-usado.pdf", creado: "2026-09-30T10:00:00Z" },
+    { ruta: "c1/b/viejo-huerfano.pdf", creado: "2026-09-30T10:00:00Z" },
+    { ruta: "c1/c/reciente-huerfano.pdf", creado: "2026-10-02T09:00:00Z" },
+    { ruta: "c1/d/justo-24h.pdf", creado: "2026-10-01T12:00:00Z" },
+    { ruta: "c1/e/sin-fecha.pdf", creado: null },
+    { ruta: "c1/f/fecha-rota.pdf", creado: "ayer" },
+  ];
+  const usados = new Set(["c1/a/viejo-usado.pdf"]);
+  assert.deepEqual(ficherosHuerfanos(objetos, usados, ahora), ["c1/b/viejo-huerfano.pdf"]);
+  assert.deepEqual(ficherosHuerfanos(objetos, usados, ahora, 1), ["c1/b/viejo-huerfano.pdf", "c1/c/reciente-huerfano.pdf", "c1/d/justo-24h.pdf"]);
+  assert.deepEqual(ficherosHuerfanos([], usados, ahora), []);
 });

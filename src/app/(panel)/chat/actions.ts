@@ -38,6 +38,7 @@ import {
   validaTextoMensaje,
 } from "@/lib/chat/core";
 import type { ConversacionListada, Mensaje, ResultadoBusqueda } from "@/lib/types";
+import { notificar } from "@/lib/notificaciones";
 
 // Chat interno (US-06). Todas las acciones usan el cliente con la sesión del
 // usuario: la RLS (chat_puede_ver) decide qué puede leer y dónde puede escribir.
@@ -58,7 +59,6 @@ function mensajeError(e: unknown, porDefecto: string): string {
 /** Máximo de menciones por mensaje (evita avisos masivos). */
 const MAX_MENCIONES = 20;
 
-type Supabase = Awaited<ReturnType<typeof createClient>>;
 type Admin = ReturnType<typeof createAdminClient>;
 
 /**
@@ -218,7 +218,7 @@ export async function enviarMensaje(entrada: {
 
   if (menciones.length > 0) {
     const autor = miembros.find((m) => m.id === user.id)?.nombre ?? "Un compañero";
-    await avisarMenciones(supabase, conversacionId, id, autor, menciones);
+    await avisarMenciones(conversacionId, id, autor, menciones);
   }
   return { mensaje: data as unknown as Mensaje };
 }
@@ -377,7 +377,6 @@ export async function buscarMensajes(
 
 /** UC-605 AC-16: aviso en la campana para cada mencionado. Nunca lanza. */
 async function avisarMenciones(
-  supabase: Supabase,
   conversacionId: string,
   mensajeId: string,
   autor: string,
@@ -389,20 +388,7 @@ async function avisarMenciones(
       ? textoAvisoMencion(autor, conv, conv.cliente_nombre)
       : `${autor} te ha mencionado en el chat`;
     const enlace = `/chat/${conversacionId}?m=${mensajeId}`;
-    const r = await Promise.allSettled(
-      menciones.map((uid) =>
-        supabase.rpc("crear_notificacion", {
-          p_usuario: uid,
-          p_tipo: "mencion_chat",
-          p_mensaje: texto,
-          p_enlace: enlace,
-        }),
-      ),
-    );
-    for (const x of r) {
-      if (x.status === "rejected") console.error("[chat] aviso mención", x.reason);
-      else if (x.value.error) console.error("[chat] aviso mención", x.value.error);
-    }
+    await notificar(menciones.map((uid) => ({ usuario: uid, tipo: "mencion_chat", mensaje: texto, enlace })));
   } catch (e) {
     console.error("[chat] aviso mención", e);
   }

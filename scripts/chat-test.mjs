@@ -28,7 +28,7 @@ import pg from 'pg';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIGRACIONES = [
   '0020_chat.sql', '0021_chat_fase2.sql', '0022_comentarios_insert.sql', '0023_chat_fase3.sql',
-  '0024_chat_adjuntos_unicos.sql',
+  '0024_chat_adjuntos_unicos.sql', '0025_notificaciones_solo_servidor.sql',
 ];
 const rutaMigracion = (f) => join(__dirname, '..', 'supabase', 'migrations', f);
 
@@ -727,6 +727,16 @@ try {
   await q(`select set_config('realtime.topic', '', true)`);
   await asSuperuser();
   check('Realtime · NO miembro NO lee los broadcast de chat:<canal ajeno>', leeAjeno === 0);
+
+  // 0025 · los avisos solo los crea el servidor (antes cualquiera podía fabricarlos)
+  await asUser(asesorBdj);
+  check('Notificaciones · un usuario NO puede llamar a crear_notificacion (42501)',
+    (await codigoError('select public.crear_notificacion($1, $2, $3, $4)', [asesorCas, 'mencion_chat', 'falso', '/'])) === '42501');
+  await asSuperuser();
+  const priv = (await q(`select has_function_privilege('service_role', 'public.crear_notificacion(uuid,text,text,text)', 'execute') as sr,
+                                has_function_privilege('authenticated', 'public.crear_notificacion(uuid,text,text,text)', 'execute') as au,
+                                has_function_privilege('anon', 'public.crear_notificacion(uuid,text,text,text)', 'execute') as an`)).rows[0];
+  check('Notificaciones · solo service_role puede crear avisos', priv.sr === true && priv.au === false && priv.an === false);
 
   await q('rollback');  // nada de esto persiste
   console.log(`\n${fail === 0 ? '✓' : '✗'} Chat interno: ${pass} ok, ${fail} fallidos`);
