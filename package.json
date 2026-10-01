@@ -11,7 +11,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --import tsx --test tests/unit/*.test.ts",
+    "test": "node --import tsx --test tests/unit/*.test.ts agente/tests/*.test.ts",
     "db:apply": "node scripts/db-apply.mjs",
     "db:rls-test": "node scripts/rls-test.mjs",
     "db:clientes-test": "node scripts/clientes-test.mjs",
@@ -30,7 +30,9 @@
     "db:chat-realtime-test": "node scripts/chat-realtime-test.mjs",
     "e2e:chat": "node scripts/chat-e2e-test.mjs",
     "e2e:chat-fase2": "node scripts/chat-e2e-fase2-test.mjs",
-    "e2e:chat-fase3": "node scripts/chat-e2e-fase3-test.mjs"
+    "e2e:chat-fase3": "node scripts/chat-e2e-fase3-test.mjs",
+    "agente:test": "node --import tsx --test agente/tests/*.test.ts",
+    "agente:build": "node agente/build.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.69.0",
@@ -48,7 +50,9 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@yao-pkg/pkg": "^6.23.0",
     "dotenv": "^16.4.7",
+    "esbuild": "^0.28.2",
     "eslint": "^9",
     "eslint-config-next": "16.3.6",
     "pg": "^8.13.1",

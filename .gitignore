@@ -56,3 +56,6 @@ doc/clientes/
 .vercel
 .env*
 !.env.example
+
+# Agente del servidor: ejecutables generados
+agente/dist/
