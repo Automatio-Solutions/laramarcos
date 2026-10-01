@@ -1,0 +1,31 @@
+<!-- Servicio de Windows para el agente (WinSW v2). Va junto a LaraMarcosOCR-servicio.exe. -->
+<service>
+  <id>LaraMarcosOCR</id>
+  <name>LaraMarcos OCR (precontabilización)</name>
+  <description>Lee las facturas de las carpetas GASTOS/INGRESOS de los clientes, las envía a la app de LaraMarcos y deja el Excel de Aplifisa en la carpeta del trimestre.</description>
+  <executable>%BASE%\LaraMarcosOCR.exe</executable>
+  <workingdirectory>%BASE%</workingdirectory>
+
+  <!-- Arranca solo con el servidor (con retardo, cuando la red ya está lista). -->
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+
+  <!-- Si se cae, se levanta solo. -->
+  <onfailure action="restart" delay="1 min" />
+  <onfailure action="restart" delay="5 min" />
+  <onfailure action="restart" delay="15 min" />
+  <resetfailure>1 hour</resetfailure>
+
+  <!-- Al parar: Ctrl+C y hasta 2 minutos para terminar la factura en curso. -->
+  <stoptimeout>120 sec</stoptimeout>
+
+  <!-- Salida de consola del servicio (el registro detallado está en logs\agente-AAAA-MM-DD.log). -->
+  <logpath>%BASE%\logs\servicio</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+
+  <!-- La cuenta (automatiosrv) se pone en services.msc > Iniciar sesión: así la
+       contraseña no queda escrita en ningún fichero. Ver INSTALAR.md. -->
+</service>

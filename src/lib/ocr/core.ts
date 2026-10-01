@@ -397,7 +397,27 @@ export function oficinaDeCarpeta(seg: string, oficinas: readonly string[]): stri
   return oficinas.find((o) => sinEspacios(o) === s) ?? null;
 }
 
-const esCarpetaClientes = (seg: string) => /^(\d+ )?CLIENTES$/.test(normalizaTexto(seg));
+/** "01. CLIENTES" (el número delante da igual). */
+export const esCarpetaClientes = (seg: string) => /^(\d+ )?CLIENTES$/.test(normalizaTexto(seg));
+
+/** "06. CONTABILIDAD", "07. CONTABILIDAD"… (el número cambia según el cliente). */
+export const esCarpetaContabilidad = (seg: string) => /(^| )CONTABILIDAD$/.test(normalizaTexto(seg));
+
+/** "AÑO 2026" o "2026" → 2026; si no es una carpeta de año, null. */
+export function anioDeCarpeta(seg: string): number | null {
+  const m = /^(?:ANO )?((?:19|20)\d{2})$/.exec(normalizaTexto(seg));
+  return m ? Number(m[1]) : null;
+}
+
+/** "1º TRIMESTRE", "1er trimestre", "1T"… → 1; si no es una carpeta de trimestre, null. */
+export function trimestreDeCarpeta(seg: string): number | null {
+  const s = normalizaTexto(seg);
+  const m = /^([1-4]) ?(?:ER|O|ST)? ?TRIM/.exec(s) ?? /^([1-4]) ?T$/.exec(s);
+  return m ? Number(m[1]) : null;
+}
+
+/** Mismo nombre de cliente aunque cambien orden, puntos, acentos o "&"/"Y". */
+export const mismoNombre = (a: string, b: string) => claveNombre(a) === claveNombre(b);
 
 /** GASTOS → gasto, INGRESOS → ingreso (la carpeta dice el libro). */
 export function tipoDeCarpetas(carpetas: string[]): TipoFactura | null {

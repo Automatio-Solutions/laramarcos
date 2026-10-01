@@ -16,6 +16,8 @@ const eslintConfig = defineConfig([
     "doc/**",
     "supabase/**",
     "scripts/**",
+    // Ejecutable generado del agente del servidor (código empaquetado)
+    "agente/dist/**",
   ]),
 ]);
 

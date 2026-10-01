@@ -1,0 +1,17 @@
+{
+  "raiz": "D:\\DocumentacionLM",
+  "api": "https://crm.laramarcosasesores.es",
+  "clave": "PEGAR_AQUI_AGENTE_SECRET",
+  "clientes": [
+    "KANTARADS DIGITAL, S.L.",
+    "PREVENCION Y CONTROL SI, S.L.",
+    "OBRAS DIAZ QUINTANA, S.L.",
+    "GARCIN & REGO, S.C."
+  ],
+  "desde": "2026-4T",
+  "intervaloSegundos": 120,
+  "horario": null,
+  "crearCarpetas": true,
+  "enParalelo": 2,
+  "segundosEstable": 60
+}
